@@ -60,3 +60,6 @@ target/
 
 #Ipython Notebook
 .ipynb_checkpoints
+
+# <hyin/Feb-10th-2016> ignore the folder containing binary data
+bin/
