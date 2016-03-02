@@ -38,10 +38,14 @@ def plot_single_stroke_char_or_digit(data):
     return fig, ax
 
 import Image
+import ImageOps
 import os.path
 import time
+from collections import defaultdict
 
 def generate_images_for_chars_and_digits(data, overwrite=False, grayscale=True, thumbnail_size=(28, 28)):
+    img_data = defaultdict(list)
+
     func_path = os.path.dirname(os.path.realpath(__file__))
     folder = 'bin/images'
     gs_folder = 'bin/grayscale'
@@ -78,13 +82,19 @@ def generate_images_for_chars_and_digits(data, overwrite=False, grayscale=True, 
                 #load the image to have a grayscale file
                 image=Image.open(tmp_fpath).convert("L")
                 image.thumbnail(thumbnail_size)
+                inverted_image = ImageOps.invert(image)
                 # arr=np.asarray(image)
                 # plt.figimage(arr,cmap=cm.Greys_r)
 
                 tmp_fname_grayscale = 'ascii_{0}_{1:03d}_grayscale_thumbnail.png'.format(ord(dict_key), d_idx)
                 tmp_fpath_grayscale = os.path.join(gs_output_path_char, tmp_fname_grayscale)
                 print 'Generating grayscale image {0}'.format(tmp_fname_grayscale)
-                image.save(tmp_fpath_grayscale)
+                inverted_image.save(tmp_fpath_grayscale)
                 # plt.close(fig)
+
+                #get the np array data for this image
+                img_data[char_folder].append(np.asarray(inverted_image))
+
             # time.sleep(0.5)
-    return
+    return img_data
+
