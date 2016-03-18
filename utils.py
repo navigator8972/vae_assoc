@@ -27,7 +27,7 @@ def plot_single_stroke_char_or_digit(data):
     fig.add_axes(ax)
 
     data_len = len(data[:-1])/2
-    ax.plot(data[:data_len], -data[data_len:-1], 'k', linewidth=8.0)
+    ax.plot(data[:data_len], -data[data_len:-1], 'k', linewidth=12.0)
     #<hyin/Feb-9th-2016> we need to carefully define the limits of axes
     ax.set_xlim([-1.5, 1.5])
     ax.set_ylim([-1.5, 1.5])
