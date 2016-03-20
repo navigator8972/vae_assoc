@@ -98,3 +98,33 @@ def generate_images_for_chars_and_digits(data, overwrite=False, grayscale=True, 
             # time.sleep(0.5)
     return img_data
 
+#utilities for computing convenience
+from scipy import interpolate
+
+def expand_traj_dim_with_derivative(data, dt=0.01):
+    augmented_trajs = []
+    for traj in data:
+        time_len = len(traj)
+        t = np.linspace(0, time_len*dt, time_len)
+        if time_len > 3:
+            if len(traj.shape) == 1:
+                """
+                mono-dimension trajectory, row as the entire trajectory...
+                """
+                spl = interpolate.splrep(t, traj)
+                traj_der = interpolate.splev(t, spl, der=1)
+                tmp_augmented_traj = np.array([traj, traj_der]).T
+            else:
+                """
+                multi-dimensional trajectory, row as the state variable...
+                """
+                tmp_traj_der = []
+                for traj_dof in traj.T:
+                    spl_dof = interpolate.splrep(t, traj_dof)
+                    traj_dof_der = interpolate.splev(t, spl_dof, der=1)
+                    tmp_traj_der.append(traj_dof_der)
+                tmp_augmented_traj = np.vstack([traj.T, np.array(tmp_traj_der)]).T
+
+            augmented_trajs.append(tmp_augmented_traj)
+
+    return augmented_trajs

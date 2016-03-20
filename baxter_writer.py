@@ -15,6 +15,10 @@ import matplotlib.pyplot as plt
 
 import baxter_pykdl
 
+import pylqr.pylqr_trajctrl as plqrtc
+
+import utils
+
 class BaxterWriter():
     def __init__(self):
         self.prepare_baxter_robot_manipulator(manip_idx=1)
@@ -66,7 +70,7 @@ class BaxterWriter():
             else:
                 q_seed = q
                 q_array.append(q)
-        return q_array
+        return np.array(q_array)
 
     def derive_cartesian_trajectory(self, q_array):
         #derive cartesian trajectory from q_array
@@ -75,6 +79,47 @@ class BaxterWriter():
             cart_pose = self.robot_dynamics.forward_position_kinematics(q)
             spatial_traj.append(cart_pose)
         return spatial_traj
+
+    def derive_ilqr_trajectory(self, spatial_traj):
+        dt = .01
+        #derive joint trajectory from ilqr
+        lqr_traj_ctrl = plqrtc.PyLQR_TrajCtrl(R=.01, dt=dt)
+
+        #cost function
+        def traj_cost(x, u, t, aux):
+            #x is the given joint position, evaluate forward kinematics
+            cart_pose = self.robot_dynamics.forward_position_kinematics(x[0:7])
+            track_err = np.linalg.norm((cart_pose[0:3] - spatial_traj[t])*np.array([10., 10., 50]))**2
+            #control effort from inverse dynamics
+            jnt_mass = self.robot_dynamics.inertia(x[:7])
+            # jnt_coriolis = self.robot_dynamics.coriolis(x[:7], x[7:])
+            # jnt_gravity = self.robot_dynamics.gravity(x[:7])
+            # tau = jnt_mass.dot(u) + jnt_coriolis + jnt_gravity
+            # tau = jnt_coriolis + jnt_gravity
+            tau = jnt_mass.dot(u)
+            #control effort from control input
+            # tau = u
+            ctrl_effort = np.linalg.norm(tau) ** 2
+            return track_err + lqr_traj_ctrl.R_ * ctrl_effort
+
+        lqr_traj_ctrl.build_ilqr_general_solver(cost_func=traj_cost, n_dims=7, T=100)
+
+        #prepare initial guess of trajectory, from the IK solution
+        q_ik = self.derive_ik_trajectory(spatial_traj)
+        x0 = q_ik[0] #init velocity is zero, this is handled in the ilqr_traj_ctrl
+
+        q_dot_ik = np.diff(q_ik, axis=0) / dt
+        q_dot_ik = np.vstack([np.zeros(7), q_dot_ik])   #initial velocity is zero
+        q_ddot_ik = np.diff(q_dot_ik, axis=0) / dt
+        u_array_init = q_ddot_ik
+        #test this init
+        #note there will be some difference as the trajectory ilqr force the initial velocity as zero
+        #while the finite difference is not the case
+        # x_array = lqr_traj_ctrl.ilqr_.forward_propagation(np.concatenate([x0, np.zeros(7)]), u_array_init)
+        # print q_ik - np.array(x_array)[:, 0:7]
+
+        syn_traj = lqr_traj_ctrl.synthesize_trajectory(x0, u_array_init, n_itrs=25)
+        return syn_traj[:, 0:7]
 
 def build_ik_joint_traj_for_chars(data):
     baxter_writer = BaxterWriter()
@@ -150,11 +195,28 @@ def main():
     print 'Finished reconstructing Cartesian trajectory.'
     #extract 2D trajectory
     recons_char_traj = np.array([cart_pose[0:2] for cart_pose in cart_array])
-    z_array = [cart_pose[3] for cart_pose in cart_array]
-    print 'Z - mean and std:', np.mean(z_array), np.std(z_array)
+
+    z_array = [cart_pose[2] for cart_pose in cart_array]
+    print 'IK - Z - mean and std:', np.mean(z_array), np.std(z_array)
 
     #show the reconstructed trajectory
     ax.plot(recons_char_traj[:, 0], recons_char_traj[:, 1], 'r', linewidth=3.5)
+
+    raw_input('ENTER to continue derive iLQR optimal control')
+
+    print 'Solving iLQR optimal trajectories'
+    q_array_ilqr = baxter_writer.derive_ilqr_trajectory(spatial_traj)
+    print 'Finished solving iLQR optimal control'
+    #restore to cartesian motion
+    print 'Reconstructing Cartesian trajectory...'
+    cart_array_ilqr = baxter_writer.derive_cartesian_trajectory(q_array_ilqr)
+    print 'Finished reconstructing Cartesian trajectory.'
+    #extract 2D trajectory
+    recons_char_traj_ilqr = np.array([cart_pose[0:2] for cart_pose in cart_array_ilqr])
+    z_array_ilqr = [cart_pose[2] for cart_pose in cart_array_ilqr]
+    print 'iLQR - Z - mean and std:', np.mean(z_array_ilqr), np.std(z_array_ilqr)
+
+    ax.plot(recons_char_traj_ilqr[:, 0], recons_char_traj_ilqr[:, 1], 'g', linewidth=3.5)
 
     plt.show()
     return
