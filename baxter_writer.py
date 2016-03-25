@@ -138,7 +138,24 @@ def build_ik_joint_traj_for_chars(data):
 
     return res_data
 
-def check_joint_ik_data(cart_data, jnt_data, n_chars=5, n_samples=1):
+def build_ilqr_joint_traj_for_chars(data):
+    baxter_writer = BaxterWriter()
+    res_data = defaultdict(list)
+
+    for c in data.keys():
+        print 'Processing character {0}...'.format(c)
+        for d in data[c]:
+            tmp_char_traj = np.reshape(d[:-1], (2, -1)).T
+            tmp_spatial_traj = baxter_writer.generate_spatial_trajectory(tmp_char_traj)
+
+            tmp_q_array = baxter_writer.derive_ilqr_trajectory(tmp_spatial_traj)
+
+            #note the data is transposed and flattened as the cartesian trajectories
+            res_data[c].append(np.array(tmp_q_array).T.flatten())
+
+    return res_data
+
+def check_joint_data(cart_data, jnt_data, n_chars=5, n_samples=1):
     baxter_writer = BaxterWriter()
     fig = plt.figure()
     ax = fig.add_subplot(111)
