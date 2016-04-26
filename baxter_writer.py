@@ -16,12 +16,14 @@ import matplotlib.pyplot as plt
 import baxter_pykdl
 
 import pylqr.pylqr_trajctrl as plqrtc
+import pyrbf_funcapprox as fa
 
 import utils
 
 class BaxterWriter():
     def __init__(self):
         self.prepare_baxter_robot_manipulator(manip_idx=1)
+        self.prepare_manipulator_function_approximators()
 
         #the center of block to write the letter... in the world reference frame
         self.block_center = np.array([0.844, -0.357, 0.257])
@@ -46,7 +48,12 @@ class BaxterWriter():
         #print structure
         self.robot_dynamics.print_robot_description()
 
-        return 
+        return
+
+    def prepare_manipulator_function_approximators(self):
+        self.func_approxs = [fa.PyRBF_FunctionApproximator(rbf_type='sigmoid', K=20, normalize=True) for dof_idx in range(self.robot_dynamics._num_jnts)]
+        self.eval_z = np.linspace(0.0, 1.0, 100)
+        return
 
     def generate_spatial_trajectory(self, char_traj):
         """
@@ -57,6 +64,22 @@ class BaxterWriter():
         spatial_traj[:, 0:2] = char_traj * self.scale
         spatial_traj = spatial_traj + self.block_center
         return spatial_traj
+
+    def derive_jnt_traj_from_fa_parms(self, fa_parms):
+        jnt_traj = np.array([fa.evaluate(self.eval_z, fa_parm) for fa_parm, fa in zip(fa_parms, self.func_approxs)]).T
+        return jnt_traj
+
+    def derive_cartesian_trajectory_from_fa_parms(self, fa_parms):
+        jnt_traj = self.derive_jnt_traj_from_fa_parms(fa_parms)
+        spatial_traj = self.derive_cartesian_trajectory(jnt_traj)
+        return spatial_traj
+
+    def derive_fa_parms_from_jnt_traj(self, q_array):
+        z = np.linspace(0.0, 1.0, len(q_array))
+        fa_parms = []
+        for q_traj, fa in zip(q_array.T, self.func_approxs):
+            fa_parms.append(fa.fit(z, q_traj, False))
+        return fa_parms
 
     def derive_ik_trajectory(self, spatial_traj):
         # get orientation from the seed pose
@@ -155,6 +178,18 @@ def build_ilqr_joint_traj_for_chars(data):
 
     return res_data
 
+def build_fa_for_joint_trajs(data):
+    baxter_writer = BaxterWriter()
+    res_data = defaultdict(list)
+    for c in data.keys():
+        print 'Processing character {0}...'.format(c)
+        for d in data[c]:
+            tmp_jnt_traj = np.reshape(d, (7, -1)).T
+            tmp_fa_parms = baxter_writer.derive_fa_parms_from_jnt_traj(tmp_jnt_traj)
+
+            res_data[c].append(np.array(tmp_fa_parms).flatten())
+    return res_data
+
 def check_joint_data(cart_data, jnt_data, n_chars=5, n_samples=1):
     baxter_writer = BaxterWriter()
     fig = plt.figure()
@@ -175,6 +210,36 @@ def check_joint_data(cart_data, jnt_data, n_chars=5, n_samples=1):
             #reconstruction from joint trajectories...
             tmp_jnt_traj = np.reshape(jnt_data[c][idx], (7, -1)).T
             tmp_cart_array = baxter_writer.derive_cartesian_trajectory(tmp_jnt_traj)
+            recons_char_traj = np.array([cart_pose[0:2] for cart_pose in tmp_cart_array])
+            z_array = [cart_pose[3] for cart_pose in tmp_cart_array]
+            print 'Z - mean and std:', np.mean(z_array), np.std(z_array)
+
+            #show the reconstructed trajectory
+            ax.plot(recons_char_traj[:, 0], recons_char_traj[:, 1], 'r', linewidth=3.5)
+
+            plt.draw()
+    return
+
+def check_fa_parms_data(jnt_data, fa_data, n_chars=5, n_samples=1):
+    baxter_writer = BaxterWriter()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.hold(True)
+    plt.ion()
+
+    check_chars = [np.random.choice(jnt_data.keys()) for i in range(n_chars)]
+    for c in check_chars:
+        check_indices = [np.random.choice(range(len(jnt_data[c]))) for i in range(n_samples)]
+        #see how it's going for all the samples
+        for idx in check_indices:
+            tmp_jnt_traj = np.reshape(jnt_data[c][idx], (7, -1)).T
+            tmp_spatial_traj = np.array(baxter_writer.derive_cartesian_trajectory(tmp_jnt_traj))
+
+            ax.plot(tmp_spatial_traj[:, 0], tmp_spatial_traj[:, 1], 'k*', linewidth=3.5)
+
+            #reconstruction from joint trajectories...
+            tmp_fa_parms = np.reshape(fa_data[c][idx], (7, -1))
+            tmp_cart_array = baxter_writer.derive_cartesian_trajectory_from_fa_parms(tmp_fa_parms)
             recons_char_traj = np.array([cart_pose[0:2] for cart_pose in tmp_cart_array])
             z_array = [cart_pose[3] for cart_pose in tmp_cart_array]
             print 'Z - mean and std:', np.mean(z_array), np.std(z_array)

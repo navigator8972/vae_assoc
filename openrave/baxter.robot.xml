@@ -1,0 +1,16 @@
+<Robot name="baxter" file="baxter.dae">
+  <Manipulator name="left_arm">
+    <base>left_arm_mount</base>
+    <effector>left_gripper</effector>
+    <!--
+       <iksolver>baxter_ikfast.w1.left.so</iksolver>
+       -->
+  </Manipulator>
+  <Manipulator name="right_arm">
+    <base>right_arm_mount</base>
+    <effector>right_gripper</effector>
+    <!--
+    <iksolver>baxter_ikfast.w1.right.so</iksolver>
+    -->
+  </Manipulator>
+</Robot>
