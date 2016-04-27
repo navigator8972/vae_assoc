@@ -221,7 +221,7 @@ def main(replay=False):
     # baxter_robot = self.env.ReadRobotXMLFile(baxter_mdl_path)
 
     #urdf
-    res_pickle_path = os.path.join(path_prefix, './res/opt_res.p')
+    # res_pickle_path = os.path.join(path_prefix, './res/opt_res.p')
 
     #prepare a baxter writer...
     baxter_openrave_writer = BaxterWritingOpenRave()

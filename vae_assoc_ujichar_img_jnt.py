@@ -15,8 +15,8 @@ import vae_assoc
 
 import utils
 
-# np.random.seed(0)
-# tf.set_random_seed(0)
+np.random.seed(0)
+tf.set_random_seed(0)
 
 img_data = utils.extract_images(fname='bin/img_data.pkl', only_digits=False)
 
@@ -65,7 +65,7 @@ for batch_size, n_z, assoc_lambda in itertools.product(batch_sizes, n_z_array, a
     #change to clear the default graph
     tf.reset_default_graph()
     vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], assoc_lambda = assoc_lambda, learning_rate=0.0001,
-              batch_size=batch_size, training_epochs=100, display_step=5)
+              batch_size=batch_size, training_epochs=5000, display_step=5)
 
     vae_assoc_model.save_model('output/model_batchsize{}_nz{}_lambda{}.ckpt'.format(batch_size, n_z, assoc_lambda))
 
