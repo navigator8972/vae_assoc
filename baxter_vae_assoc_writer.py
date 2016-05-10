@@ -37,8 +37,8 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         self.img_network_architecture = \
             dict(scope='image',
                  n_hidden_recog_1=500, # 1st layer encoder neurons
-                 n_hidden_recog_2=300, # 2nd layer encoder neurons
-                 n_hidden_gener_1=300, # 1st layer decoder neurons
+                 n_hidden_recog_2=500, # 2nd layer encoder neurons
+                 n_hidden_gener_1=500, # 1st layer decoder neurons
                  n_hidden_gener_2=500, # 2nd layer decoder neurons
                  n_input=784, # MNIST data input (img shape: 28*28)
                  n_z=self.n_z)  # dimensionality of latent space
@@ -148,7 +148,7 @@ def main():
 
     curr_dir = os.path.dirname(os.path.realpath(__file__))
 
-    bvaw.load_model(os.path.join(curr_dir, 'output/large_lambda'), 'model_batchsize100_nz5_lambda15.ckpt')
+    bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize100_nz5_lambda15_weight30.ckpt')
     print 'Number of variabels:', len(tf.all_variables())
     n_test = 20
 
@@ -176,7 +176,7 @@ def main():
         # plt.colorbar()
 
         ax_cart = fig.add_subplot(122)
-        ax_cart.plot(cart_motion[i][:, 0], -cart_motion[i][:, 1], linewidth=3.5)
+        ax_cart.plot(-cart_motion[i][:, 1], cart_motion[i][:, 0], linewidth=3.5)
         ax_cart.set_title("Associative Motion")
         ax_cart.set_aspect('equal')
 

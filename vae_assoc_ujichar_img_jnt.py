@@ -34,20 +34,22 @@ aug_data = np.concatenate((img_data, fa_data_normed), axis=1)
 data_sets = dataset.construct_datasets(aug_data)
 
 batch_sizes = [100]
+#n_z_array = [3, 5, 10, 20]
 n_z_array = [5]
-#n_z_array = [15]
 # assoc_lambda_array = [1, 3, 5, 10]
 # assoc_lambda_array = [.1, .3, .5]
+#assoc_lambda_array = [15, 40]
 assoc_lambda_array = [15]
-# assoc_lambda_array = [1]
+#weights_array = [[2, 1], [5, 1], [10, 1]]
+weights_array=[[30, 1]]
 
-for batch_size, n_z, assoc_lambda in itertools.product(batch_sizes, n_z_array, assoc_lambda_array):
+for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z_array, assoc_lambda_array, weights_array):
 
     img_network_architecture = \
         dict(scope='image',
              n_hidden_recog_1=500, # 1st layer encoder neurons
-             n_hidden_recog_2=300, # 2nd layer encoder neurons
-             n_hidden_gener_1=300, # 1st layer decoder neurons
+             n_hidden_recog_2=500, # 2nd layer encoder neurons
+             n_hidden_gener_1=500, # 1st layer decoder neurons
              n_hidden_gener_2=500, # 2nd layer decoder neurons
              n_input=784, # MNIST data input (img shape: 28*28)
              n_z=n_z)  # dimensionality of latent space
@@ -64,10 +66,10 @@ for batch_size, n_z, assoc_lambda in itertools.product(batch_sizes, n_z_array, a
     #create a new graph to ensure the resource is released after the training
     #change to clear the default graph
     tf.reset_default_graph()
-    vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], assoc_lambda = assoc_lambda, learning_rate=0.0001,
+    vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], weights=weights, assoc_lambda = assoc_lambda, learning_rate=0.0001,
               batch_size=batch_size, training_epochs=5000, display_step=5)
 
-    vae_assoc_model.save_model('output/model_batchsize{}_nz{}_lambda{}.ckpt'.format(batch_size, n_z, assoc_lambda))
+    vae_assoc_model.save_model('output/model_batchsize{}_nz{}_lambda{}_weight{}.ckpt'.format(batch_size, n_z, assoc_lambda, weights[0]))
 
     # time.sleep(10)
     # #change to clear the default graph
@@ -116,14 +118,14 @@ for batch_size, n_z, assoc_lambda in itertools.product(batch_sizes, n_z_array, a
         # plt.subplot(5, 2, 2*i + 1, projection='3d')
         # plt.plot(xs=cart_sample[i][:, 0], ys=cart_sample[i][:, 1], zs=cart_sample[i][:, 2], linewidth=3.5)
         plt.subplot(5, 6, 6*i + 1)
-        plt.plot(cart_sample[i][:, 0], -cart_sample[i][:, 1], linewidth=3.5)
+        plt.plot(-cart_sample[i][:, 1], cart_sample[i][:, 0], linewidth=3.5)
         plt.title("Test joint input")
         plt.axis('equal')
         cart_z_sample = np.concatenate([cart_z_sample, cart_sample[i][:, 2]])
         # plt.subplot(5, 2, 2*i + 2, projection='3d')
         # plt.plot(xs=cart_reconstruct[i][:, 0], ys=cart_reconstruct[i][:, 1], zs=cart_reconstruct[i][:, 2], linewidth=3.5)
         plt.subplot(5, 6, 6*i + 2)
-        plt.plot(cart_reconstruct[i][:, 0], -cart_reconstruct[i][:, 1], linewidth=3.5)
+        plt.plot(-cart_reconstruct[i][:, 1], cart_reconstruct[i][:, 0], linewidth=3.5)
         plt.title("Reconstruction joint")
         plt.axis('equal')
         cart_z_reconstr = np.concatenate([cart_z_reconstr, cart_reconstruct[i][:, 2]])
@@ -143,12 +145,12 @@ for batch_size, n_z, assoc_lambda in itertools.product(batch_sizes, n_z_array, a
         plt.colorbar()
 
         plt.subplot(5, 6, 6*i + 6)
-        plt.plot(cart_synthesis[i][:, 0], -cart_synthesis[i][:, 1], linewidth=3.5)
+        plt.plot(-cart_synthesis[i][:, 1], cart_synthesis[i][:, 0], linewidth=3.5)
         plt.title("Synthesis joint")
         plt.axis('equal')
         cart_z_synthesis = np.concatenate([cart_z_synthesis, cart_synthesis[i][:, 2]])
 
-    plt.savefig('output/samples_batchsize{}_nz{}_lambda{}.svg'.format(batch_size, n_z, assoc_lambda))
+    plt.savefig('output/samples_batchsize{}_nz{}_lambda{}_weight{}.svg'.format(batch_size, n_z, assoc_lambda, weights[0]))
 
     print 'Sample Z Coord:', np.mean(cart_z_sample), np.std(cart_z_sample)
     print 'Reconstr Z Coord:', np.mean(cart_z_reconstr), np.std(cart_z_reconstr)
@@ -181,8 +183,8 @@ for batch_size, n_z, assoc_lambda in itertools.product(batch_sizes, n_z_array, a
     Xi, Yi = np.meshgrid(x_values, y_values)
     plt.imshow(canvas, origin="upper")
     plt.tight_layout()
-    plt.savefig('output/samples_2d_batchsize{}_nz{}_lambda{}.svg'.format(batch_size, n_z, assoc_lambda))
+    plt.savefig('output/samples_2d_batchsize{}_nz{}_lambda{}_weight{}.svg'.format(batch_size, n_z, assoc_lambda, weights[0]))
 
     #plt.show()
     #save cost hist
-    cp.dump(cost_hist, open('output/cost_hist_batchsize{}_nz{}_lambda{}.pkl'.format(batch_size, n_z, assoc_lambda), 'wb'))
+    cp.dump(cost_hist, open('output/cost_hist_batchsize{}_nz{}_lambda{}_weight{}.pkl'.format(batch_size, n_z, assoc_lambda, weights[0]), 'wb'))

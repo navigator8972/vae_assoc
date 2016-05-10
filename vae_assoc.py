@@ -23,7 +23,7 @@ class AssocVariationalAutoEncoder(object):
 
     Generally we force the latent variable for two sensory modals to be same by penalizing the divergence of Gaussian distributions
     '''
-    def __init__(self, network_architectures, binary=True, transfer_fct=tf.nn.softplus, assoc_lambda = 1.0,
+    def __init__(self, network_architectures, binary=True, transfer_fct=tf.nn.softplus, weights = 1.0, assoc_lambda = 1.0,
                  learning_rate=0.001, batch_size=100):
         self.network_architectures = network_architectures
         self.assoc_lambda = assoc_lambda
@@ -33,6 +33,12 @@ class AssocVariationalAutoEncoder(object):
             self.binary = binary
         else:
             self.binary = [binary] * len(network_architectures)
+
+        if type(weights) is list:
+            assert len(weights) == len(network_architectures)
+            self.weights = weights
+        else:
+            self.weights = [weights] * len(network_architectures)
 
         # if type(transfer_fct) is list:
         #     assert len(transfer_fct) == len(network_architectures)
@@ -182,7 +188,7 @@ class AssocVariationalAutoEncoder(object):
         self.vae_costs = []
         self.vae_reconstr_losses = []
         self.vae_latent_losses = []
-        for binary, x, x_reconstr_mean, z_mean, z_log_sigma_sq in zip(self.binary, self.x, self.x_reconstr_means, self.z_means, self.z_log_sigma_sqs):
+        for binary, x, x_reconstr_mean, z_mean, z_log_sigma_sq, weight in zip(self.binary, self.x, self.x_reconstr_means, self.z_means, self.z_log_sigma_sqs, self.weights):
             if binary:
                 reconstr_loss = \
                     -tf.reduce_sum(x * tf.log(1e-3 + x_reconstr_mean)
@@ -203,7 +209,7 @@ class AssocVariationalAutoEncoder(object):
                                                - tf.exp(z_log_sigma_sq), 1)
             self.vae_reconstr_losses.append(reconstr_loss)
             self.vae_latent_losses.append(latent_loss)
-            self.vae_costs.append(tf.reduce_mean(reconstr_loss + latent_loss))
+            self.vae_costs.append(tf.reduce_mean(reconstr_loss + latent_loss) * weight)
 
         #<hyin/Apr-8th-2016> now we have a third term to associate latent representations
         #associativity regularization reconstron the latent representations
@@ -317,11 +323,12 @@ class AssocVariationalAutoEncoder(object):
             print 'Invalid or non-exist model folder.'
         return
 
-def train(data_sets, network_architectures, binary=True, assoc_lambda=1e-5, learning_rate=0.001,
+def train(data_sets, network_architectures, binary=True, weights=1.0, assoc_lambda=1e-5, learning_rate=0.001,
           batch_size=100, training_epochs=10, display_step=5, early_stop=False):
     vae_assoc = AssocVariationalAutoEncoder(network_architectures,
                                  binary,
                                  transfer_fct=tf.nn.relu,
+                                 weights=weights,
                                  assoc_lambda=assoc_lambda,
                                  learning_rate=learning_rate,
                                  batch_size=batch_size)

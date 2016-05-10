@@ -169,6 +169,9 @@ def build_ilqr_joint_traj_for_chars(data):
         print 'Processing character {0}...'.format(c)
         for d in data[c]:
             tmp_char_traj = np.reshape(d[:-1], (2, -1)).T
+            #note the x axis is pointing to the frontal side of baxter
+            #remember to convert it
+            tmp_char_traj = np.array([-tmp_char_traj[:, 1], -tmp_char_traj[:, 0]]).T
             tmp_spatial_traj = baxter_writer.generate_spatial_trajectory(tmp_char_traj)
 
             tmp_q_array = baxter_writer.derive_ilqr_trajectory(tmp_spatial_traj)
@@ -205,12 +208,16 @@ def check_joint_data(cart_data, jnt_data, n_chars=5, n_samples=1):
             tmp_char_traj = np.reshape(cart_data[c][idx][:-1], (2, -1)).T
             tmp_spatial_traj = baxter_writer.generate_spatial_trajectory(tmp_char_traj)
 
-            ax.plot(tmp_spatial_traj[:, 0], tmp_spatial_traj[:, 1], 'k*', linewidth=3.5)
+            ax.plot(tmp_spatial_traj[:, 0], -tmp_spatial_traj[:, 1], 'k*', linewidth=3.5)
 
             #reconstruction from joint trajectories...
             tmp_jnt_traj = np.reshape(jnt_data[c][idx], (7, -1)).T
             tmp_cart_array = baxter_writer.derive_cartesian_trajectory(tmp_jnt_traj)
             recons_char_traj = np.array([cart_pose[0:2] for cart_pose in tmp_cart_array])
+            #alignment
+            recons_char_traj = np.array([-recons_char_traj[:, 1], recons_char_traj[:, 0]]).T
+            recons_char_traj = recons_char_traj - recons_char_traj[0, 0:2] + np.array([tmp_spatial_traj[0, 0], -tmp_spatial_traj[0, 1]])
+
             z_array = [cart_pose[3] for cart_pose in tmp_cart_array]
             print 'Z - mean and std:', np.mean(z_array), np.std(z_array)
 
@@ -241,6 +248,9 @@ def check_fa_parms_data(jnt_data, fa_data, n_chars=5, n_samples=1):
             tmp_fa_parms = np.reshape(fa_data[c][idx], (7, -1))
             tmp_cart_array = baxter_writer.derive_cartesian_trajectory_from_fa_parms(tmp_fa_parms)
             recons_char_traj = np.array([cart_pose[0:2] for cart_pose in tmp_cart_array])
+            #alignment
+            # recons_char_traj = np.array([-recons_char_traj[:, 1], recons_char_traj[:, 0]]).T
+            recons_char_traj = recons_char_traj - recons_char_traj[0, 0:2] + tmp_spatial_traj[0, 0:2]
             z_array = [cart_pose[3] for cart_pose in tmp_cart_array]
             print 'Z - mean and std:', np.mean(z_array), np.std(z_array)
 
