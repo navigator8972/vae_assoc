@@ -1,7 +1,8 @@
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 
-from PIL import Image
+import Image
+import ImageOps
 
 import numpy as np
 import matplotlib
@@ -166,6 +167,8 @@ class DrawingPad(QMainWindow):
 
         self.main_hbox.addLayout(self.ctrl_pnl_layout, 3)
 
+        self.img_data = None
+        self.on_send_usr_callback = None
         return
 
     def on_send_button_clicked(self, event):
@@ -173,10 +176,14 @@ class DrawingPad(QMainWindow):
         #prepare an image
         w, h, d = img_data.shape
         img = Image.fromstring( "RGBA", ( w ,h ), img_data.tostring() )
-        img.convert('LA')
+        img_gs = img.convert('L')
         thumbnail_size = (28, 28)
-        img.thumbnail(thumbnail_size)
-        img.show()
+        img_gs.thumbnail(thumbnail_size)
+        img_gs_inv = ImageOps.invert(img_gs)
+        # img.show()
+        self.img_data = np.asarray(img_gs_inv).flatten().astype(np.float32) * 1./255.
+        if self.on_send_usr_callback is not None:
+            self.on_send_usr_callback(self)
         return
 
 import sys

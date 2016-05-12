@@ -140,8 +140,15 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         return None, None
 
 import os
+import sys
+import drawing_pad as dp
+import threading
 
-def main():
+from PyQt4.QtCore import *
+from PyQt4.QtGui import *
+
+
+def main(use_gui=False):
     #prepare a writer and load a trained model
     tf.reset_default_graph()
     bvaw = BaxterVAEAssocWriter()
@@ -150,7 +157,6 @@ def main():
 
     bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize100_nz5_lambda15_weight30.ckpt')
     print 'Number of variabels:', len(tf.all_variables())
-    n_test = 20
 
     #prepare ros stuff
     rospy.init_node('baxter_vaeassoc_writer')
@@ -159,45 +165,79 @@ def main():
     jnt_pub = rospy.Publisher('/baxter_openrave_writer/joint_cmd', JointState, queue_size=10)
     cln_pub = rospy.Publisher('/baxter_openrave_writer/clear_cmd', Empty, queue_size=10)
 
-    plt.ion()
+    if not use_gui:
+        n_test = 20
 
-    test_sample = bvaw.data_sets.test.next_batch(bvaw.batch_size)[0] #the first is feature, the second is the label
-    test_img_sample = test_sample[:, :784]
-    jnt_motion, cart_motion = bvaw.derive_robot_motion_from_from_img(test_img_sample)
+        plt.ion()
 
-    raw_input('ENTER to start the test...')
+        test_sample = bvaw.data_sets.test.next_batch(bvaw.batch_size)[0] #the first is feature, the second is the label
+        test_img_sample = test_sample[:, :784]
+        jnt_motion, cart_motion = bvaw.derive_robot_motion_from_from_img(test_img_sample)
 
-    for i in range(n_test):
-        #prepare image to show
-        fig = plt.figure()
-        ax_img = fig.add_subplot(121)
-        ax_img.imshow(test_img_sample[i].reshape(28, 28), vmin=0, vmax=1, cmap='gray')
-        ax_img.set_title("Test Image Input")
-        # plt.colorbar()
+        raw_input('ENTER to start the test...')
 
-        ax_cart = fig.add_subplot(122)
-        ax_cart.plot(-cart_motion[i][:, 1], cart_motion[i][:, 0], linewidth=3.5)
-        ax_cart.set_title("Associative Motion")
-        ax_cart.set_aspect('equal')
+        for i in range(n_test):
+            #prepare image to show
+            fig = plt.figure()
+            ax_img = fig.add_subplot(121)
+            ax_img.imshow(test_img_sample[i].reshape(28, 28), vmin=0, vmax=1, cmap='gray')
+            ax_img.set_title("Test Image Input")
+            # plt.colorbar()
 
-        # print 'z coord mean and std: {}, {}'.format(z_coord_mean, z_coord_std)
+            ax_cart = fig.add_subplot(122)
+            ax_cart.plot(-cart_motion[i][:, 1], cart_motion[i][:, 0], linewidth=3.5)
+            ax_cart.set_title("Associative Motion")
+            ax_cart.set_aspect('equal')
 
-        plt.draw()
+            # print 'z coord mean and std: {}, {}'.format(z_coord_mean, z_coord_std)
 
-        print 'Sending joint command to a viewer...'
-        cln_pub.publish(Empty())
-        for k in range(10):
-            r.sleep()
-        jnt_msg = JointState()
-        for cmd in jnt_motion[i]:
-            jnt_msg.position = cmd
-            jnt_pub.publish(jnt_msg)
-            r.sleep()
+            plt.draw()
 
-        raw_input()
+            print 'Sending joint command to a viewer...'
+            cln_pub.publish(Empty())
+            for k in range(10):
+                r.sleep()
+            jnt_msg = JointState()
+            for cmd in jnt_motion[i]:
+                jnt_msg.position = cmd
+                jnt_pub.publish(jnt_msg)
+                r.sleep()
+
+            raw_input()
+    else:
+        app = QApplication(sys.argv)
+        dpad = dp.DrawingPad()
+
+        #threading function
+        def threading_func(img_data, writer, rate, clean_pub, write_pub):
+            jnt_motion, cart_motion = bvaw.derive_robot_motion_from_from_img(img_data)
+            print 'Sending joint command to a viewer...'
+            cln_pub.publish(Empty())
+            for k in range(10):
+                rate.sleep()
+            jnt_msg = JointState()
+            for cmd in jnt_motion:
+                jnt_msg.position = cmd
+                jnt_pub.publish(jnt_msg)
+                rate.sleep()
+            return
+
+        #prepare a user callback to send the message
+        def send_msg(gui):
+            t = threading.Thread(target=threading_func, args = (gui.img_data, bvaw, r, cln_pub, jnt_pub))
+            t.daemon = True
+            t.start()
+            return
+
+        dpad.on_send_usr_callback = send_msg
+
+        dpad.show()
+        print 'Start a drawing pad...'
+        app.exec_()
+
     return
 
 if __name__ == '__main__':
     np.random.seed(0)
     tf.set_random_seed(0)
-    main()
+    main(use_gui=True)
