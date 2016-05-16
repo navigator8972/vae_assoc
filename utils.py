@@ -185,3 +185,98 @@ def extract_jnt_fa_parms(data=None, fname=None, only_digits=True, dtype=np.float
     fa_mean = np.mean(fa_parms, axis=0)
     fa_std = np.std(fa_parms, axis=0)
     return fa_parms, fa_mean, fa_std
+
+import pytrajkin_rxzero as pytk_rz
+
+def get_vel_profile(stroke):
+    """
+    get the velocity profile for a stroke
+    input is an array of position coordinates
+    """
+    vel = np.diff(stroke, axis=0)
+    vel_prf = np.sum(vel**2, axis=-1)**(1./2)
+    return vel_prf
+
+def get_continuous_ang(stroke):
+    """
+    get continous angle profile
+    see Continous-Angle-Time-Curve
+    """
+    vel_vec = np.diff(stroke, axis=0)
+    ang = np.arctan2(vel_vec[:, 1], vel_vec[:, 0])
+    #compute the change of ang
+    ang_diff = np.diff(ang)
+    #x and y:
+    #x = cos(ang_diff)
+    #y = sin(ang_diff)
+    x = np.cos(ang_diff)
+    y = np.sin(ang_diff)
+    thres = 1e-14
+    #update delta diff
+    for idx in range(len(ang_diff)):
+        if x[idx] > thres:
+            ang_diff[idx] = np.arctan2(y[idx], x[idx])
+        elif x[idx] < -thres and y[idx] > 0:
+            ang_diff[idx] = np.arctan2(y[idx], x[idx]) + np.pi
+        elif x[idx] < -thres and y[idx] < 0:
+            ang_diff[idx] = np.arctan2(y[idx], x[idx]) - np.pi
+        elif np.abs(x[idx]) < thres and y[idx] > 0:
+            ang_diff[idx] = np.pi/2
+        elif np.abs(x[idx]) < thres and y[idx] < 0:
+            ang_diff[idx] = -np.pi/2
+    cont_ang_prf = ang[0] + np.cumsum(ang_diff)
+    return np.concatenate([[ang[0]], cont_ang_prf])
+
+def extend_data_with_lognormal_sampling(data_dict, sample_per_char=100, shift_mean=True):
+    #<hyin/May-11th-2016> function to diversify the ujichar data
+    #the motivation is that, the single stroke letters are not even thus the trained model
+    #tend to not perform well for less observed samples. The idea is to generate locally perturbed
+    #letters based on human handwriting, with the developed sampling scheme based upon lognormal model
+    #note it is desired to balance the number of samples...
+    res_data = defaultdict(list)
+    #for shifting the data to center it
+    sum_coord = np.zeros(2)
+    n_data = 0
+    for char in sorted(data_dict.keys()):
+        n_samples = int(sample_per_char/(len(data_dict[char]) + 1))
+        if n_samples == 0:
+            #just get the record and continue
+            res_data[char] = data_dict[char]
+        else:
+            #lets first estimate the lognormal parameters for the letter and then perturb them...
+            for traj in data_dict[char]:
+                res_data[char] += [traj]
+                res_data[char] += extend_data_with_lognormal_sampling_helper(traj, n_samples)
+        n_data += np.sum([len(d) for d in res_data[char]])
+        if shift_mean:
+            sum_coord += np.sum(np.array([np.sum(np.reshape(d[:-1], (2, -1)).T, axis=0) for d in res_data[char]]), axis=0)
+    if shift_mean:
+        mean_coord = sum_coord / float(n_data)
+        #shift the data
+        for char in sorted(res_data.keys()):
+            for d_idx in range(len(res_data[char])):
+                data_len = (len(res_data[char][d_idx]) - 1)/2
+                res_data[char][d_idx][0:data_len] -= mean_coord[0]
+                res_data[char][d_idx][data_len:-1] -= mean_coord[1]
+    return res_data
+
+def extend_data_with_lognormal_sampling_helper(char_traj, n_samples):
+    #the input char_traj is flattened with the last entry as the time, get the 2D form
+    data_len = (len(char_traj) - 1)/2
+    t_idx = np.linspace(0, 1.0, data_len)
+    #is it necessary to also have noise on this?
+    x0 = char_traj[0]
+    y0 = char_traj[data_len]
+    pos_traj = np.array([char_traj[:data_len], char_traj[data_len:-1]]).T
+    #estimate the lognormal parms
+    lognorm_parms = np.array(pytk_rz.rxzero_train(pos_traj))
+    n_comps = len(lognorm_parms)
+    #generate noise for each components, considering amplitude (+-20%), start angle(+-20 deg) and straightness(+-10% difference)
+    ang_difference = lognorm_parms[:, 5] - lognorm_parms[:, 4]
+    noises = np.random.randn(n_samples, n_comps, 3) / 3      #white noise to ensure 99.7% samples are within the specified range...
+    parm_noises = np.array([ np.array([noise[:, 0]*.2*lognorm_parms[:, 0], np.zeros(n_comps), np.zeros(n_comps), np.zeros(n_comps),
+        noise[:, 1]*np.pi/9, noise[:, 1]*np.pi/9 + noise[:, 2]*.1*ang_difference]).T for noise in noises])
+    perturbed_parms = np.array([lognorm_parms + parm_noise for parm_noise in parm_noises])
+    #apply the noise, remember to flatten and put back the phase scale...
+    res_char_trajs = [np.concatenate([pytk_rz.rxzero_traj_eval(perturbed_parm, t_idx, x0, y0)[0].T.flatten(), [char_traj[-1]]]) for perturbed_parm in perturbed_parms]
+    return res_char_trajs
