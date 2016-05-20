@@ -70,8 +70,9 @@ def generate_images_for_chars_and_digits(data, overwrite=False, grayscale=True, 
 
         for d_idx, d in enumerate(data[dict_key]):
             # print 'Generating images for the {0}-th demonstrations...'.format(d_idx)
-            tmp_fname = 'ascii_{0}_{1:03d}.png'.format(ord(dict_key), d_idx)
+            tmp_fname = 'ascii_{0}_{1:04d}.png'.format(ord(dict_key), d_idx)
             tmp_fpath = os.path.join(output_path_char, tmp_fname)
+            fig = None
             if not os.path.exists(tmp_fpath) or overwrite:
                 print tmp_fpath
                 fig, ax = plot_single_stroke_char_or_digit(d)
@@ -80,21 +81,28 @@ def generate_images_for_chars_and_digits(data, overwrite=False, grayscale=True, 
 
             if grayscale:
                 #load the image to have a grayscale file
-                image=Image.open(tmp_fpath).convert("L")
-                image.thumbnail(thumbnail_size)
-                inverted_image = ImageOps.invert(image)
+                # image=Image.open(tmp_fpath).convert("L")
+                # inverted_image = ImageOps.invert(image)
+                # image.thumbnail(thumbnail_size)
                 # arr=np.asarray(image)
                 # plt.figimage(arr,cmap=cm.Greys_r)
 
-                tmp_fname_grayscale = 'ascii_{0}_{1:03d}_grayscale_thumbnail.png'.format(ord(dict_key), d_idx)
+                tmp_fname_grayscale = 'ascii_{0}_{1:04d}_grayscale_thumbnail.png'.format(ord(dict_key), d_idx)
                 tmp_fpath_grayscale = os.path.join(gs_output_path_char, tmp_fname_grayscale)
-                print 'Generating grayscale image {0}'.format(tmp_fname_grayscale)
-                inverted_image.save(tmp_fpath_grayscale)
+                if not os.path.exists(tmp_fpath_grayscale) or overwrite:
+                    thumbnail = get_char_img_thumbnail(tmp_fpath, tmp_fpath_grayscale)
+                    print 'Generating grayscale image {0}'.format(tmp_fname_grayscale)
+                else:
+                    image = Image.open(tmp_fpath_grayscale)
+                    thumbnail = np.asarray(image)
+                    # image.close()
+                # inverted_image.save(tmp_fpath_grayscale)
                 # plt.close(fig)
 
                 #get the np array data for this image
-                img_data[char_folder].append(np.asarray(inverted_image))
-
+                img_data[char_folder].append(np.asarray(thumbnail))
+            if fig is not None:
+                plt.close(fig)
             # time.sleep(0.5)
     return img_data
 
@@ -186,6 +194,68 @@ def extract_jnt_fa_parms(data=None, fname=None, only_digits=True, dtype=np.float
     fa_std = np.std(fa_parms, axis=0)
     return fa_parms, fa_mean, fa_std
 
+
+import cv2
+'''
+utility to threshold the character image
+'''
+def threshold_char_image(img):
+    #do nothing for now
+    return img
+'''
+utility to segment character contour and get the rectangular bounding box
+'''
+def segment_char_contour_bounding_box(img):
+    ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    rects = [cv2.boundingRect(ctr) for ctr in ctrs]
+    #for blank image
+    if len(rects) == 0:
+        return [0, 0, img.shape[1], img.shape[0]]
+    #rect length-4 array, (rect[0], rect[1]) - lower left corner point, (rect[2], rect[3]) - width, height
+    corner_pnts = []
+    for rect in rects:
+        corner_pnts.append([rect[0], rect[1]])
+        corner_pnts.append([rect[0]+rect[2], rect[1]+rect[3]])
+    corner_pnts = np.array(corner_pnts)
+    l_corner_pnt = np.amin(corner_pnts, axis=0)
+    u_corner_pnt = np.amax(corner_pnts, axis=0)
+    return [l_corner_pnt[0], l_corner_pnt[1], u_corner_pnt[0]-l_corner_pnt[0], u_corner_pnt[1]-l_corner_pnt[1]]
+'''
+utility to resize
+'''
+def get_char_img_thumbnail(img_fname, gs_fname):
+    #convert this pil image to the cv one
+    cv_img = cv2.imread(img_fname)
+    cv_img_gs = cv2.cvtColor(np.array(cv_img), cv2.COLOR_BGR2GRAY)
+    cv_img_gs_inv = 255 - cv_img_gs
+    #first threshold the img
+    thres_img = threshold_char_image(cv_img_gs_inv)
+    #then figure out the contour bouding box
+    bound_rect = segment_char_contour_bounding_box(thres_img)
+    center = [bound_rect[0] + bound_rect[2]/2., bound_rect[1] + bound_rect[3]/2.]
+    #crop the interested part
+    leng = max([int(bound_rect[2]), int(bound_rect[3])])
+    border = int(0.6*leng)
+    pt1 = int(center[1] -bound_rect[3] // 2)
+    pt2 = int(center[0] -bound_rect[2] // 2)
+    cv_img_bckgrnd = np.ones((border+leng, border+leng))
+    # print cv_img_bckgrnd.shape
+    # print bound_rect
+    # print center
+    # print border
+    # print (pt1+border//2),(pt1+bound_rect[3]+border//2), (pt2+border//2),(pt2+bound_rect[2]+border//2)
+    # print cv_img_bckgrnd[(border//2):(bound_rect[3]+border//2), (border//2):(bound_rect[2]+border//2)].shape
+
+    cv_img_bckgrnd[ (border//2+(leng-bound_rect[3])//2):(bound_rect[3]+border//2+(leng-bound_rect[3])//2),
+                    (border//2+(leng-bound_rect[2])//2):(bound_rect[2]+border//2+(leng-bound_rect[2])//2)] = cv_img_gs_inv[pt1:(pt1+bound_rect[3]), pt2:(pt2+bound_rect[2])]
+    # roi = cv_img_gs_inv[pt1:(pt1+border*2+leng), pt2:(pt2+border*2+leng)]
+    # Resize the image
+    roi = cv2.resize(cv_img_bckgrnd, (28, 28), interpolation=cv2.INTER_AREA)
+    roi = cv2.dilate(roi, (3, 3))
+    #write this image
+    cv2.imwrite(gs_fname, roi)
+    return roi
+
 import pytrajkin_rxzero as pytk_rz
 
 def get_vel_profile(stroke):
@@ -235,8 +305,6 @@ def extend_data_with_lognormal_sampling(data_dict, sample_per_char=100, shift_me
     #note it is desired to balance the number of samples...
     res_data = defaultdict(list)
     #for shifting the data to center it
-    sum_coord = np.zeros(2)
-    n_data = 0
     for char in sorted(data_dict.keys()):
         n_samples = int(sample_per_char/(len(data_dict[char]) + 1))
         if n_samples == 0:
@@ -246,21 +314,10 @@ def extend_data_with_lognormal_sampling(data_dict, sample_per_char=100, shift_me
             #lets first estimate the lognormal parameters for the letter and then perturb them...
             for traj in data_dict[char]:
                 res_data[char] += [traj]
-                res_data[char] += extend_data_with_lognormal_sampling_helper(traj, n_samples)
-        n_data += np.sum([len(d) for d in res_data[char]])
-        if shift_mean:
-            sum_coord += np.sum(np.array([np.sum(np.reshape(d[:-1], (2, -1)).T, axis=0) for d in res_data[char]]), axis=0)
-    if shift_mean:
-        mean_coord = sum_coord / float(n_data)
-        #shift the data
-        for char in sorted(res_data.keys()):
-            for d_idx in range(len(res_data[char])):
-                data_len = (len(res_data[char][d_idx]) - 1)/2
-                res_data[char][d_idx][0:data_len] -= mean_coord[0]
-                res_data[char][d_idx][data_len:-1] -= mean_coord[1]
+                res_data[char] += extend_data_with_lognormal_sampling_helper(traj, n_samples, shift_mean)
     return res_data
 
-def extend_data_with_lognormal_sampling_helper(char_traj, n_samples):
+def extend_data_with_lognormal_sampling_helper(char_traj, n_samples, shift_mean):
     #the input char_traj is flattened with the last entry as the time, get the 2D form
     data_len = (len(char_traj) - 1)/2
     t_idx = np.linspace(0, 1.0, data_len)
@@ -270,6 +327,9 @@ def extend_data_with_lognormal_sampling_helper(char_traj, n_samples):
     pos_traj = np.array([char_traj[:data_len], char_traj[data_len:-1]]).T
     #estimate the lognormal parms
     lognorm_parms = np.array(pytk_rz.rxzero_train(pos_traj))
+    if np.any(np.isinf(lognorm_parms)):
+        print 'Unable to extract lognormal parameters. Only use the original trajectory.'
+        return []
     n_comps = len(lognorm_parms)
     #generate noise for each components, considering amplitude (+-20%), start angle(+-20 deg) and straightness(+-10% difference)
     ang_difference = lognorm_parms[:, 5] - lognorm_parms[:, 4]
@@ -279,4 +339,10 @@ def extend_data_with_lognormal_sampling_helper(char_traj, n_samples):
     perturbed_parms = np.array([lognorm_parms + parm_noise for parm_noise in parm_noises])
     #apply the noise, remember to flatten and put back the phase scale...
     res_char_trajs = [np.concatenate([pytk_rz.rxzero_traj_eval(perturbed_parm, t_idx, x0, y0)[0].T.flatten(), [char_traj[-1]]]) for perturbed_parm in perturbed_parms]
+    if shift_mean:
+        mean_coords =  [np.mean(np.reshape(traj[:-1], (2, -1)).T, axis=0) for traj in res_char_trajs]
+        for d_idx in range(len(res_char_trajs)):
+            data_len = (len(res_char_trajs[d_idx]) - 1)/2
+            res_char_trajs[d_idx][0:data_len] -= mean_coords[d_idx][0]
+            res_char_trajs[d_idx][data_len:-1] -= mean_coords[d_idx][1]
     return res_char_trajs
