@@ -251,7 +251,7 @@ def get_char_img_thumbnail(img_fname, gs_fname):
     # roi = cv_img_gs_inv[pt1:(pt1+border*2+leng), pt2:(pt2+border*2+leng)]
     # Resize the image
     roi = cv2.resize(cv_img_bckgrnd, (28, 28), interpolation=cv2.INTER_AREA)
-    roi = cv2.dilate(roi, (3, 3))
+    # roi = cv2.dilate(roi, (3, 3))
     #write this image
     cv2.imwrite(gs_fname, roi)
     return roi

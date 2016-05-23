@@ -152,6 +152,8 @@ def build_ik_joint_traj_for_chars(data):
         print 'Processing character {0}...'.format(c)
         for d in data[c]:
             tmp_char_traj = np.reshape(d[:-1], (2, -1)).T
+            #<hyin/May-23rd-2016> also remember to rotate the orientation
+            tmp_char_traj = np.array([-tmp_char_traj[:, 1], -tmp_char_traj[:, 0]]).T
             tmp_spatial_traj = baxter_writer.generate_spatial_trajectory(tmp_char_traj)
 
             tmp_q_array = baxter_writer.derive_ik_trajectory(tmp_spatial_traj)
