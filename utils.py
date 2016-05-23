@@ -194,7 +194,6 @@ def extract_jnt_fa_parms(data=None, fname=None, only_digits=True, dtype=np.float
     fa_std = np.std(fa_parms, axis=0)
     return fa_parms, fa_mean, fa_std
 
-
 import cv2
 '''
 utility to threshold the character image
