@@ -70,9 +70,14 @@ class AssocVariationalAutoEncoder(object):
         self.saver = tf.train.Saver()
         return
 
+    def _unpack_network_arguments(self, scope, hidden_conv, n_hidden_recog_1, n_hidden_recog_2,
+                            n_hidden_gener_1,  n_hidden_gener_2,
+                            n_input, n_z):
+        return scope, hidden_conv, n_hidden_recog_1, n_hidden_recog_2, n_hidden_gener_1,  n_hidden_gener_2, n_input, n_z
+
     def _create_network(self, batch_size):
         # Initialize autoencode network weights and biases
-        self.network_weights = [self._initialize_weights(**na) for na in self.network_architectures]
+        # self.network_weights = [self._initialize_weights(**na) for na in self.network_architectures]
 
         self.z_means = []
         self.z_log_sigma_sqs = []
@@ -85,14 +90,14 @@ class AssocVariationalAutoEncoder(object):
         tmp_eps = tf.random_normal((batch_size, self.n_z), 0, 1,
                                dtype=tf.float32)
 
-        for sens_idx, nw in enumerate(self.network_weights):
+        for sens_idx, na in enumerate(self.network_architectures):
+
             # Use recognition network to determine mean and
             # (log) variance of Gaussian distribution in latent
             # space
             tmp_z_mean, tmp_z_log_sigma_sq = \
                 self._recognition_network(self.x[sens_idx],
-                                          nw["weights_recog"],
-                                          nw["biases_recog"])
+                                          na)
             # z = mu + sigma*epsilon
             tmp_z = tf.add(tmp_z_mean,
                             tf.mul(tf.sqrt(tf.exp(tmp_z_log_sigma_sq)), tmp_eps))
@@ -101,9 +106,9 @@ class AssocVariationalAutoEncoder(object):
             # Bernoulli distribution of reconstructed input
             tmp_x_reconstr_mean = \
                 self._generator_network(tmp_z,
-                                        nw["weights_gener"],
-                                        nw["biases_gener"],
-                                        self.binary[sens_idx])
+                                        na,
+                                        self.binary[sens_idx],
+                                        conv_enable=True)
 
             #store related tf variables
             self.z_means.append(tmp_z_mean)
@@ -141,38 +146,161 @@ class AssocVariationalAutoEncoder(object):
                 'out_log_sigma': tf.Variable(tf.zeros([n_input], dtype=tf.float32))}
         return all_weights
 
-    def _recognition_network(self, x, weights, biases):
+    # def _recognition_network(self, x, weights, biases):
+    #     # Generate probabilistic encoder (recognition network), which
+    #     # maps inputs onto a normal distribution in latent space.
+    #     # The transformation is parametrized and can be learned.
+    #     layer_1 = self.transfer_fct(tf.add(tf.matmul(x, weights['h1']),
+    #                                        biases['b1']))
+    #     layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights['h2']),
+    #                                        biases['b2']))
+    #     z_mean = tf.add(tf.matmul(layer_2, weights['out_mean']),
+    #                     biases['out_mean'])
+    #     z_log_sigma_sq = \
+    #         tf.add(tf.matmul(layer_2, weights['out_log_sigma']),
+    #                biases['out_log_sigma'])
+    #     return (z_mean, z_log_sigma_sq)
+    def _recognition_network(self, x, network_architecture):
         # Generate probabilistic encoder (recognition network), which
         # maps inputs onto a normal distribution in latent space.
         # The transformation is parametrized and can be learned.
-        layer_1 = self.transfer_fct(tf.add(tf.matmul(x, weights['h1']),
-                                           biases['b1']))
-        layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights['h2']),
-                                           biases['b2']))
-        z_mean = tf.add(tf.matmul(layer_2, weights['out_mean']),
-                        biases['out_mean'])
-        z_log_sigma_sq = \
-            tf.add(tf.matmul(layer_2, weights['out_log_sigma']),
-                   biases['out_log_sigma'])
+        scope, hidden_conv, n_hidden_recog_1, n_hidden_recog_2, n_hidden_gener_1,  n_hidden_gener_2, n_input, n_z = self._unpack_network_arguments(**network_architecture)
+        with tf.variable_scope(scope):
+            if hidden_conv:
+                #convolution layer filtering over 2d 28x28 images
+                input_size = int(np.sqrt(n_input))
+                x_2d = tf.reshape(x, [-1, input_size, input_size, 1])
+                #convolution layers use their own initialization of weight variables
+                layer_0_5 = conv_2d(    x_2d,
+                                        filter_set=[5, 1, n_hidden_recog_1],
+                                        stride=2,
+                                        padding='SAME',
+                                        transfer_fct=None)  #no nonlinear transformation here
+                layer_1 = conv_2d(  layer_0_5,
+                                    filter_set=[5, n_hidden_recog_1, n_hidden_recog_1*2],
+                                    stride=2,
+                                    padding='SAME',
+                                    transfer_fct=None)
+            else:
+                weights_hidden_1 = tf.Variable(xavier_init(n_input, n_hidden_recog_1))
+                biases_hidden_1 = tf.Variable(tf.zeros([n_hidden_recog_1], dtype=tf.float32))
+                layer_1 = self.transfer_fct(tf.add(tf.matmul(x, weights_hidden_1),
+                                               biases_hidden_1))
+
+            if hidden_conv:
+                # layer_1_size = (input_size - 5) / 1
+                layer_1_size = input_size / 2 / 2
+                #convolution layers use their own initialization of weight variables
+                layer_2_2d = conv_2d(   layer_1,
+                                        filter_set=[5, n_hidden_recog_1*2, n_hidden_recog_2],
+                                        stride=1,
+                                        padding='VALID')  #no nonlinear transformation here
+                layer_2_size = (layer_1_size - 5) / 1 + 1
+                layer_2 = tf.reshape(layer_2_2d, (-1, layer_2_size*layer_2_size*n_hidden_recog_2))
+            else:
+                weights_hidden_2 = tf.Variable(xavier_init(n_hidden_recog_1, n_hidden_recog_2))
+                biases_hidden_2 = tf.Variable(tf.zeros([n_hidden_recog_2], dtype=tf.float32))
+                layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights_hidden_2),
+                                               biases_hidden_2))
+
+            if hidden_conv:
+                weights_out_mean = tf.Variable(xavier_init(layer_2_size * layer_2_size * n_hidden_recog_2, n_z))
+                biases_out_mean = tf.Variable(tf.zeros([n_z], dtype=tf.float32))
+                weights_out_log_sigma = tf.Variable(xavier_init(layer_2_size * layer_2_size * n_hidden_recog_2, n_z))
+                biases_out_log_sigma = tf.Variable(tf.zeros([n_z], dtype=tf.float32))
+            else:
+                weights_out_mean = tf.Variable(xavier_init(n_hidden_recog_2, n_z))
+                biases_out_mean = tf.Variable(tf.zeros([n_z], dtype=tf.float32))
+                weights_out_log_sigma = tf.Variable(xavier_init(n_hidden_recog_2, n_z))
+                biases_out_log_sigma = tf.Variable(tf.zeros([n_z], dtype=tf.float32))
+
+            z_mean = tf.add(tf.matmul(layer_2, weights_out_mean),
+                            biases_out_mean)
+            z_log_sigma_sq = \
+                tf.add(tf.matmul(layer_2, weights_out_log_sigma),
+                       biases_out_log_sigma)
         return (z_mean, z_log_sigma_sq)
 
-    def _generator_network(self, z, weights, biases, binary):
+    # def _generator_network(self, z, weights, biases, binary):
+    #     # Generate probabilistic decoder (decoder network), which
+    #     # maps points in latent space onto a Bernoulli distribution in data space.
+    #     # The transformation is parametrized and can be learned.
+    #     layer_1 = self.transfer_fct(tf.add(tf.matmul(z, weights['h1']),
+    #                                        biases['b1']))
+    #     layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights['h2']),
+    #                                        biases['b2']))
+    #
+    #     if binary:
+    #         x_reconstr_mean = \
+    #             tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['out_mean']),
+    #                                  biases['out_mean']))
+    #     else:
+    #         x_reconstr_mean = \
+    #             tf.add(tf.matmul(layer_2, weights['out_mean']),
+    #                                  biases['out_mean'])
+    #     return x_reconstr_mean
+
+    def _generator_network(self, z, network_architecture, binary, conv_enable=True):
         # Generate probabilistic decoder (decoder network), which
         # maps points in latent space onto a Bernoulli distribution in data space.
         # The transformation is parametrized and can be learned.
-        layer_1 = self.transfer_fct(tf.add(tf.matmul(z, weights['h1']),
-                                           biases['b1']))
-        layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights['h2']),
-                                           biases['b2']))
+        scope, hidden_conv, n_hidden_recog_1, n_hidden_recog_2, n_hidden_gener_1,  n_hidden_gener_2, n_input, n_z = self._unpack_network_arguments(**network_architecture)
+        with tf.variable_scope(scope):
+            if hidden_conv and conv_enable:
+                z_2d = tf.reshape(z, (-1, 1, 1, n_z))
+                layer_1 = deconv_2d(    z_2d,
+                                        filter_set=[3, n_z, n_hidden_gener_1],
+                                        stride=None,
+                                        padding='VALID'
+                                        )   # no nonlinear transformation
+            else:
+                weights_hidden_1 = tf.Variable(xavier_init(n_z, n_hidden_recog_1))
+                biases_hidden_1 = tf.Variable(tf.zeros([n_hidden_recog_1], dtype=tf.float32))
+                layer_1 = self.transfer_fct(tf.add(tf.matmul(z, weights_hidden_1),
+                                               biases_hidden_1))
 
-        if binary:
-            x_reconstr_mean = \
-                tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['out_mean']),
-                                     biases['out_mean']))
-        else:
-            x_reconstr_mean = \
-                tf.add(tf.matmul(layer_2, weights['out_mean']),
-                                     biases['out_mean'])
+            if hidden_conv and conv_enable:
+                layer_1_25 = deconv_2d(     layer_1,
+                                            filter_set=[5, n_hidden_gener_1, n_hidden_gener_1/2],
+                                            stride=1,
+                                            padding='VALID'
+                                        )   # no nonlinear transformation
+                layer_1_50 = deconv_2d(     layer_1_25,
+                                            filter_set=[5, n_hidden_gener_1/2, n_hidden_gener_2],
+                                            stride=2,
+                                            padding='SAME'
+                                            )   # no nonlinear transformation
+                layer_2_2d = deconv_2d(     layer_1_50,
+                                            filter_set=[5, n_hidden_gener_2, 1],
+                                            stride=2,
+                                            padding='SAME'
+                                            )   # no nonlinear transformation
+                layer_2 = tf.reshape(layer_2_2d, (-1, n_input))
+            else:
+                weights_hidden_2 = tf.Variable(xavier_init(n_hidden_recog_1, n_hidden_recog_2))
+                biases_hidden_2 = tf.Variable(tf.zeros([n_hidden_recog_2], dtype=tf.float32))
+                layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights_hidden_2),
+                                               biases_hidden_2))
+
+            if binary:
+                if hidden_conv and conv_enable:
+                    weights_genr_mean = tf.Variable(xavier_init(n_input, n_input))
+                    biases_genr_mean = tf.Variable(tf.zeros([n_input]))
+                    x_reconstr_mean = \
+                        tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights_genr_mean),
+                                             biases_genr_mean))
+                else:
+                    weights_genr_mean = tf.Variable(xavier_init(n_hidden_recog_2, n_input))
+                    biases_genr_mean = tf.Variable(tf.zeros([n_input]))
+                    x_reconstr_mean = \
+                        tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights_genr_mean),
+                                             biases_genr_mean))
+            else:
+                weights_genr_mean = tf.Variable(xavier_init(n_hidden_recog_2, n_input))
+                biases_genr_mean = tf.Variable(tf.zeros([n_input]))
+                x_reconstr_mean = \
+                    tf.add(tf.matmul(layer_2, weights_genr_mean),
+                                         biases_genr_mean)
         return x_reconstr_mean
 
     def _create_loss_optimizer(self):
@@ -228,6 +356,12 @@ class AssocVariationalAutoEncoder(object):
                 0.5 * (tf.reduce_sum(self.z_log_sigma_sqs[j], 1) - tf.reduce_sum(self.z_log_sigma_sqs[i], 1) - self.n_z
                 + tf.reduce_sum(tf.exp(self.z_log_sigma_sqs[i] - self.z_log_sigma_sqs[j]), 1)
                 + tf.reduce_sum(tf.mul(tf.square(self.z_means[j] - self.z_means[i]), tf.exp(-self.z_log_sigma_sqs[j])), 1))
+                )
+                #<hyin/May-19th-2016> try a symmetry distance
+                + tf.reduce_sum(
+                0.5 * (tf.reduce_sum(self.z_log_sigma_sqs[i], 1) - tf.reduce_sum(self.z_log_sigma_sqs[j], 1) - self.n_z
+                + tf.reduce_sum(tf.exp(self.z_log_sigma_sqs[j] - self.z_log_sigma_sqs[i]), 1)
+                + tf.reduce_sum(tf.mul(tf.square(self.z_means[i] - self.z_means[j]), tf.exp(-self.z_log_sigma_sqs[i])), 1))
                 )
                 )
 
@@ -322,6 +456,39 @@ class AssocVariationalAutoEncoder(object):
         else:
             print 'Invalid or non-exist model folder.'
         return
+
+'''
+Convolution hidden layer for 2d grayscale image
+'''
+import prettytensor as pt
+from deconv import deconv2d
+
+def weight_variable(shape):
+  initial = tf.truncated_normal(shape, stddev=0.1)
+  return tf.Variable(initial)
+
+def bias_variable(shape):
+  initial = tf.constant(0.1, shape=shape)
+  return tf.Variable(initial)
+
+# helper functions for convolution and deconvolution operation for 2D mono-channel images
+def conv_2d(x_2d, filter_set=[5, 1, 32], stride=2, padding='VALID', transfer_fct=None):
+    #hidden layer with a convolution operation
+    W_conv = weight_variable([filter_set[0], filter_set[0], filter_set[1], filter_set[2]])
+    if transfer_fct is not None:
+        h_conv = transfer_fct(tf.nn.conv2d(x_2d, W_conv, strides=(1, stride, stride, 1), padding=padding))
+    else:
+        h_conv = tf.nn.conv2d(x_2d, W_conv, strides=(1, stride, stride, 1), padding=padding)
+
+    #no pooling for now
+    return h_conv
+
+def deconv_2d(x_2d, filter_set=[5, 32, 1], stride=None, padding='VALID', transfer_fct=tf.nn.sigmoid):
+
+    return (pt.wrap(x_2d).
+            # reshape([-1, 1, 1, filter_set[1]]).
+            deconv2d(kernel=filter_set[0], depth=filter_set[2], stride=stride, edges=padding, activation_fn=transfer_fct)
+            ).tensor
 
 def train(data_sets, network_architectures, binary=True, weights=1.0, assoc_lambda=1e-5, learning_rate=0.001,
           batch_size=100, training_epochs=10, display_step=5, early_stop=False):

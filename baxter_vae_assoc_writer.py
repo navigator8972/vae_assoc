@@ -31,11 +31,12 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
     def initialize_tf_environment(self):
         self.batch_size = 100
-        self.n_z = 5
+        self.n_z = 10
         self.assoc_lambda = 15
 
         self.img_network_architecture = \
             dict(scope='image',
+                 hidden_conv=False,
                  n_hidden_recog_1=500, # 1st layer encoder neurons
                  n_hidden_recog_2=500, # 2nd layer encoder neurons
                  n_hidden_gener_1=500, # 1st layer decoder neurons
@@ -45,12 +46,32 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
         self.jnt_network_architecture = \
             dict(scope='joint',
-                 n_hidden_recog_1=200, # 1st layer encoder neurons
+                 hidden_conv=False,
+                 n_hidden_recog_1=200, # 1st layer encoder nmodel_batchsize64_nz10_lambda8_weight30eurons
                  n_hidden_recog_2=200, # 2nd layer encoder neurons
                  n_hidden_gener_1=200, # 1st layer decoder neurons
                  n_hidden_gener_2=200, # 2nd lAttempting to use uninitialized valueayer decoder neurons
                  n_input=147, # 21 bases for each function approximator
                  n_z=self.n_z)  # dimensionality of latent space
+        # self.img_network_architecture = \
+        #     dict(scope='image',
+        #          hidden_conv=True,
+        #          n_hidden_recog_1=32, # 1st layer encoder neurons - depth for convolution layer
+        #          n_hidden_recog_2=128, # 2nd layer encoder neurons - depth for convolution layer
+        #          n_hidden_gener_1=128, # 1st layer decoder neurons - depth for convolution layer
+        #          n_hidden_gener_2=32, # 2nd layer decoder neurons - depth for convolution layer
+        #          n_input=28*28, # MNIST data input (img shape: 28*28)
+        #          n_z=self.n_z)  # dimensionality of latent space
+        #
+        # self.jnt_network_architecture = \
+        #     dict(scope='joint',
+        #          hidden_conv=False,
+        #          n_hidden_recog_1=200, # 1st layer encoder neurons
+        #          n_hidden_recog_2=200, # 2nd layer encoder neurons
+        #          n_hidden_gener_1=200, # 1st layer decoder neurons
+        #          n_hidden_gener_2=200, # 2nd layer decoder neurons
+        #          n_input=147, # 21 bases for each function approximator
+        #          n_z=self.n_z)  # dimensionality of latent space
 
         self.initialize_vae_assoc()
         return
@@ -68,9 +89,9 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         return
 
     def initialize_dataset(self):
-        img_data = utils.extract_images(fname='bin/img_data.pkl', only_digits=False)
+        img_data = utils.extract_images(fname='bin/img_data_extend.pkl', only_digits=False)
         #we need mean and standard deviation to restore the function approximator
-        fa_data, self.fa_mean, self.fa_std = utils.extract_jnt_fa_parms(fname='bin/jnt_fa_data.pkl', only_digits=False)
+        fa_data, self.fa_mean, self.fa_std = utils.extract_jnt_fa_parms(fname='bin/jnt_ik_fa_data_extend.pkl', only_digits=False)
 
         fa_data_normed = (fa_data - self.fa_mean) / self.fa_std
 
@@ -155,7 +176,7 @@ def main(use_gui=False):
 
     curr_dir = os.path.dirname(os.path.realpath(__file__))
 
-    bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize100_nz5_lambda15_weight30.ckpt')
+    bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize64_nz10_lambda8_weight30.ckpt')
     print 'Number of variabels:', len(tf.all_variables())
 
     #prepare ros stuff

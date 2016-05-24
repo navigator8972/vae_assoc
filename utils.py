@@ -205,7 +205,10 @@ def threshold_char_image(img):
 utility to segment character contour and get the rectangular bounding box
 '''
 def segment_char_contour_bounding_box(img):
-    ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # for opencv below 3.0.0
+    # ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # for opencv from 3.0.0
+    _, ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     rects = [cv2.boundingRect(ctr) for ctr in ctrs]
     #for blank image
     if len(rects) == 0:
@@ -222,13 +225,9 @@ def segment_char_contour_bounding_box(img):
 '''
 utility to resize
 '''
-def get_char_img_thumbnail(img_fname, gs_fname):
-    #convert this pil image to the cv one
-    cv_img = cv2.imread(img_fname)
-    cv_img_gs = cv2.cvtColor(np.array(cv_img), cv2.COLOR_BGR2GRAY)
-    cv_img_gs_inv = 255 - cv_img_gs
+def get_char_img_thumbnail_helper(img_data):
     #first threshold the img
-    thres_img = threshold_char_image(cv_img_gs_inv)
+    thres_img = threshold_char_image(img_data)
     #then figure out the contour bouding box
     bound_rect = segment_char_contour_bounding_box(thres_img)
     center = [bound_rect[0] + bound_rect[2]/2., bound_rect[1] + bound_rect[3]/2.]
@@ -246,10 +245,17 @@ def get_char_img_thumbnail(img_fname, gs_fname):
     # print cv_img_bckgrnd[(border//2):(bound_rect[3]+border//2), (border//2):(bound_rect[2]+border//2)].shape
 
     cv_img_bckgrnd[ (border//2+(leng-bound_rect[3])//2):(bound_rect[3]+border//2+(leng-bound_rect[3])//2),
-                    (border//2+(leng-bound_rect[2])//2):(bound_rect[2]+border//2+(leng-bound_rect[2])//2)] = cv_img_gs_inv[pt1:(pt1+bound_rect[3]), pt2:(pt2+bound_rect[2])]
+                    (border//2+(leng-bound_rect[2])//2):(bound_rect[2]+border//2+(leng-bound_rect[2])//2)] = img_data[pt1:(pt1+bound_rect[3]), pt2:(pt2+bound_rect[2])]
     # roi = cv_img_gs_inv[pt1:(pt1+border*2+leng), pt2:(pt2+border*2+leng)]
     # Resize the image
     roi = cv2.resize(cv_img_bckgrnd, (28, 28), interpolation=cv2.INTER_AREA)
+    return roi, bound_rect
+def get_char_img_thumbnail(img_fname, gs_fname):
+    #convert this pil image to the cv one
+    cv_img = cv2.imread(img_fname)
+    cv_img_gs = cv2.cvtColor(np.array(cv_img), cv2.COLOR_BGR2GRAY)
+    cv_img_gs_inv = 255 - cv_img_gs
+    roi, = get_char_img_thumbnail_helper(cv_img_gs_inv)
     # roi = cv2.dilate(roi, (3, 3))
     #write this image
     cv2.imwrite(gs_fname, roi)

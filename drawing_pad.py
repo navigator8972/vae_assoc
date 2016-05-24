@@ -13,6 +13,7 @@ from matplotlib.figure import Figure
 matplotlib.rc('xtick', labelsize=8)
 matplotlib.rc('ytick', labelsize=8)
 
+import utils
 
 class DrawingPad_Painter(QWidget):
     def __init__(self, parent=None):
@@ -177,11 +178,12 @@ class DrawingPad(QMainWindow):
         w, h, d = img_data.shape
         img = Image.fromstring( "RGBA", ( w ,h ), img_data.tostring() )
         img_gs = img.convert('L')
-        thumbnail_size = (28, 28)
-        img_gs.thumbnail(thumbnail_size)
+        # thumbnail_size = (28, 28)
+        # img_gs.thumbnail(thumbnail_size)
         img_gs_inv = ImageOps.invert(img_gs)
+        img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_gs_inv))
         # img.show()
-        self.img_data = np.asarray(img_gs_inv).flatten().astype(np.float32) * 1./255.
+        self.img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
         if self.on_send_usr_callback is not None:
             self.on_send_usr_callback(self)
         return

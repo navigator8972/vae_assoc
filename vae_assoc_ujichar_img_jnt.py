@@ -18,28 +18,30 @@ import utils
 np.random.seed(0)
 tf.set_random_seed(0)
 
-img_data = utils.extract_images(fname='bin/img_data.pkl', only_digits=False)
-
+print 'Loading image data...'
+img_data = utils.extract_images(fname='bin/img_data_extend.pkl', only_digits=False)
+# img_data = utils.extract_images(fname='bin/img_data.pkl', only_digits=False)
 # img_data_sets = dataset.construct_datasets(img_data)
-
-fa_data, fa_mean, fa_std = utils.extract_jnt_fa_parms(fname='bin/jnt_fa_data.pkl', only_digits=False)
+print 'Loading joint motion data...'
+fa_data, fa_mean, fa_std = utils.extract_jnt_fa_parms(fname='bin/jnt_ik_fa_data_extend.pkl', only_digits=False)
+# fa_data, fa_mean, fa_std = utils.extract_jnt_fa_parms(fname='bin/jnt_fa_data.pkl', only_digits=False)
 #normalize data
 fa_data_normed = (fa_data - fa_mean) / fa_std
 
 # fa_data_sets = dataset.construct_datasets(fa_data_normed)
-
+print 'Constructing dataset...'
 #put them together
 aug_data = np.concatenate((img_data, fa_data_normed), axis=1)
 
-data_sets = dataset.construct_datasets(aug_data)
-
-batch_sizes = [100]
+data_sets = dataset.construct_datasets(aug_data, validation_ratio=.1, test_ratio=.1)
+print 'Start training...'
+batch_sizes = [64]
 #n_z_array = [3, 5, 10, 20]
-n_z_array = [5]
+n_z_array = [10]
 # assoc_lambda_array = [1, 3, 5, 10]
 # assoc_lambda_array = [.1, .3, .5]
 #assoc_lambda_array = [15, 40]
-assoc_lambda_array = [15]
+assoc_lambda_array = [8]
 #weights_array = [[2, 1], [5, 1], [10, 1]]
 weights_array=[[30, 1]]
 
@@ -47,6 +49,7 @@ for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z
 
     img_network_architecture = \
         dict(scope='image',
+             hidden_conv=False,
              n_hidden_recog_1=500, # 1st layer encoder neurons
              n_hidden_recog_2=500, # 2nd layer encoder neurons
              n_hidden_gener_1=500, # 1st layer decoder neurons
@@ -56,18 +59,38 @@ for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z
 
     jnt_network_architecture = \
         dict(scope='joint',
+             hidden_conv=False,
              n_hidden_recog_1=200, # 1st layer encoder neurons
              n_hidden_recog_2=200, # 2nd layer encoder neurons
              n_hidden_gener_1=200, # 1st layer decoder neurons
              n_hidden_gener_2=200, # 2nd layer decoder neurons
              n_input=147, # 21 bases for each function approximator
              n_z=n_z)  # dimensionality of latent space
+    # img_network_architecture = \
+    #     dict(scope='image',
+    #          hidden_conv=True,
+    #          n_hidden_recog_1=32, # 1st layer encoder neurons - depth for convolution layer
+    #          n_hidden_recog_2=128, # 2nd layer encoder neurons - depth for convolution layer
+    #          n_hidden_gener_1=128, # 1st layer decoder neurons - depth for convolution layer
+    #          n_hidden_gener_2=32, # 2nd layer decoder neurons - depth for convolution layer
+    #          n_input=28*28, # MNIST data input (img shape: 28*28)
+    #          n_z=n_z)  # dimensionality of latent space
+    #
+    # jnt_network_architecture = \
+    #     dict(scope='joint',
+    #          hidden_conv=False,
+    #          n_hidden_recog_1=200, # 1st layer encoder neurons
+    #          n_hidden_recog_2=200, # 2nd layer encoder neurons
+    #          n_hidden_gener_1=200, # 1st layer decoder neurons
+    #          n_hidden_gener_2=200, # 2nd layer decoder neurons
+    #          n_input=147, # 21 bases for each function approximator
+    #          n_z=n_z)  # dimensionality of latent space
 
     #create a new graph to ensure the resource is released after the training
     #change to clear the default graph
     tf.reset_default_graph()
     vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], weights=weights, assoc_lambda = assoc_lambda, learning_rate=0.0001,
-              batch_size=batch_size, training_epochs=5000, display_step=5)
+              batch_size=batch_size, training_epochs=500, display_step=5)
 
     vae_assoc_model.save_model('output/model_batchsize{}_nz{}_lambda{}_weight{}.ckpt'.format(batch_size, n_z, assoc_lambda, weights[0]))
 
@@ -173,7 +196,7 @@ for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z
     for i, yi in enumerate(x_values):
         for j, xi in enumerate(y_values):
             #check the first two dimension
-            z_mu = np.array([np.zeros(n_z)])
+            z_mu = np.zeros((batch_size, n_z))
             z_mu[0, 0] = xi
             z_mu[0, 1] = yi
             x_mean = vae_assoc_model.generate(z_mu)
