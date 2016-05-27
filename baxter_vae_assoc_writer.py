@@ -123,6 +123,52 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         self.vae_assoc_model.restore_model(folder, fname)
         return
 
+    def derive_img_from_robot_motion(self, jnt_traj):
+        # to simulate drawing the letter image from the given joint movement
+        spatial_traj = self.derive_cartesian_trajectory(jnt_traj)
+
+        fig = plt.figure(frameon=False, figsize=(4,4), dpi=100)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
+
+        data_len = len(data[:-1])/2
+        ax.plot(-spatial_traj[:, 1], spatial_traj[:, 0], linewidth=12.0)
+        ax.set_xlim([-1.5, 1.5])
+        ax.set_ylim([-1.5, 1.5])
+
+        ax.set_aspect('equal')
+        plt.tick_params(axis='both', which='both', bottom='off', top='off', labelbottom='off', right='off', left='off', labelleft='off')
+
+        fig.canvas.draw()
+        w,h = fig.canvas.get_width_height()
+
+        buf = np.fromstring ( fig.canvas.tostring_argb(), dtype=np.uint8 )
+
+        buf.shape = ( w, h, 4 )
+
+        # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
+        buf = np.roll ( buf, 3, axis = 2 )
+
+        #prepare an image
+        img = Image.fromstring( "RGBA", ( w ,h ), buf.tostring() )
+        img_gs = img.convert('L')
+        # thumbnail_size = (28, 28)
+        # img_gs.thumbnail(thumbnail_size)
+        img_gs_inv = ImageOps.invert(img_gs)
+        img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_gs_inv))
+        # img.show()
+        img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
+
+        plt.close()
+        return img_data, spatial_traj
+
+    def derive_img_from_robot_motion_fa(self, fa_parms):
+        jnt_traj = self.derive_jnt_traj_from_fa_parms(fa_parms)
+        img_data, spatial_traj = self.derive_img_from_robot_motion(jnt_traj)
+
+        return img_data, spatial_traj
+
     def derive_robot_motion_from_from_img(self, img):
         if self.vae_assoc_model is not None:
             if len(img.shape) == 1:

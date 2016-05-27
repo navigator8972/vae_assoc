@@ -43,7 +43,7 @@ n_z_array = [10]
 #assoc_lambda_array = [15, 40]
 assoc_lambda_array = [8]
 #weights_array = [[2, 1], [5, 1], [10, 1]]
-weights_array=[[30, 1]]
+weights_array=[[30, 1]] #work: 30
 
 for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z_array, assoc_lambda_array, weights_array):
 
@@ -69,10 +69,10 @@ for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z
     # img_network_architecture = \
     #     dict(scope='image',
     #          hidden_conv=True,
-    #          n_hidden_recog_1=32, # 1st layer encoder neurons - depth for convolution layer
-    #          n_hidden_recog_2=128, # 2nd layer encoder neurons - depth for convolution layer
-    #          n_hidden_gener_1=128, # 1st layer decoder neurons - depth for convolution layer
-    #          n_hidden_gener_2=32, # 2nd layer decoder neurons - depth for convolution layer
+    #          n_hidden_recog_1=16, # 1st layer encoder neurons - depth for convolution layer
+    #          n_hidden_recog_2=64, # 2nd layer encoder neurons - depth for convolution layer
+    #          n_hidden_gener_1=64, # 1st layer decoder neurons - depth for convolution layer
+    #          n_hidden_gener_2=16, # 2nd layer decoder neurons - depth for convolution layer
     #          n_input=28*28, # MNIST data input (img shape: 28*28)
     #          n_z=n_z)  # dimensionality of latent space
     #
@@ -90,7 +90,7 @@ for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z
     #change to clear the default graph
     tf.reset_default_graph()
     vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], weights=weights, assoc_lambda = assoc_lambda, learning_rate=0.0001,
-              batch_size=batch_size, training_epochs=500, display_step=5)
+              batch_size=batch_size, training_epochs=5000, display_step=5)
 
     vae_assoc_model.save_model('output/model_batchsize{}_nz{}_lambda{}_weight{}.ckpt'.format(batch_size, n_z, assoc_lambda, weights[0]))
 
