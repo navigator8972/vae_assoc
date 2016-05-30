@@ -88,7 +88,7 @@ class DrawingPad_Painter(QWidget):
     def on_clean(self, event):
         print 'clean the canvas...'
         #clear everything
-        for line in self.lines:
+        for line in self.ax_painter.lines:
             self.ax_painter.lines.remove(line)
         self.lines = []
 
