@@ -155,6 +155,16 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         # print img_loss, height_loss
         cost = img_loss + 10 * height_loss
 
+        #try to use the learned feature
+        img_data_flatten = img_data.flatten()
+        x_img = np.zeros((self.batch_size, len(img_data_flatten)))
+        x_img[0, :] = img_data_flatten
+        z_encoding = self.vae_assoc_model.transform(X=x_img, sens_idx=0)[0]
+        #norm of this encoding: euclidean distance from the mapping of the target image
+        latent_feature_loss = np.linalg.norm(z_encoding - auxargs['tar_img_latent'])
+        #use only this?
+        cost = latent_feature_loss
+
         return cost
 
     def cost_robot_cart_motion_img(self, cart_motion, auxargs):
@@ -167,11 +177,11 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         cost = img_loss
         return cost
 
-    def derive_robot_motion_from_img_posterior_rl_cartesian(self, tar_img, init_fa_parms, n_rollouts=50, n_itrs=10):
+    def derive_robot_motion_from_img_posterior_rl_cartesian(self, tar_img, tar_img_latent, init_fa_parms, n_rollouts=50, n_itrs=10):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(init_fa_parms, (self.robot_dynamics._num_jnts, -1)))
         spatial_traj = np.array(self.derive_cartesian_trajectory(jnt_traj))
 
-        auxargs = {'tar_img':tar_img, 'height': np.mean(spatial_traj[:, 2])}
+        auxargs = {'tar_img':tar_img, 'tar_img_latent':tar_img_latent, 'height': np.mean(spatial_traj[:, 2])}
 
         #init resultant image...
         init_image_data = self.derive_img_from_robot_cart_motion(spatial_traj)
@@ -232,7 +242,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
         return fa_parms
 
-    def derive_robot_motion_from_img_posterior_rl_latent(self, tar_img, init_latent_rep, n_rollouts=10, n_itrs=10):
+    def derive_robot_motion_from_img_posterior_rl_latent(self, tar_img, tar_img_latent, init_latent_rep, n_rollouts=10, n_itrs=10):
         #do posterior RL but explore within the latent representation space...
         z_mu = np.zeros((self.batch_size, len(init_latent_rep)))
         z_mu[0, :] = init_latent_rep
@@ -241,7 +251,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(init_fa_parms, (self.robot_dynamics._num_jnts, -1)))
         spatial_traj = self.derive_cartesian_trajectory(jnt_traj)
         spatial_traj = np.array(spatial_traj)
-        auxargs = {'tar_img':tar_img, 'height': np.mean(spatial_traj[:, 2])}
+        auxargs = {'tar_img':tar_img, 'tar_img_latent':tar_img_latent, 'height': np.mean(spatial_traj[:, 2])}
 
         #posterior RL procedure to refine the motion
         gcem = pygcem.GaussianCEM(x0=init_latent_rep, eliteness=10, covar_full=False, covar_learning_rate=1, covar_scale=None, covar_bounds=[0.1])
@@ -279,11 +289,11 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         res_fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)[0]
         return res_fa_parms
 
-    def derive_robot_motion_from_img_posterior_rl(self, tar_img, init_fa_parms, n_rollouts=20, n_itrs=10):
+    def derive_robot_motion_from_img_posterior_rl(self, tar_img, tar_img_latent, init_fa_parms, n_rollouts=20, n_itrs=10):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(init_fa_parms, (self.robot_dynamics._num_jnts, -1)))
         spatial_traj = self.derive_cartesian_trajectory(jnt_traj)
         spatial_traj = np.array(spatial_traj)
-        auxargs = {'tar_img':tar_img, 'height': np.mean(spatial_traj[:, 2])}
+        auxargs = {'tar_img':tar_img, 'tar_img_latent':tar_img_latent, 'height': np.mean(spatial_traj[:, 2])}
         #apply the linear constraint to fix the initial point
         for func_approx, jnt_init in zip(self.func_approxs, jnt_traj[0]):
             func_approx.set_linear_equ_constraints([0], [jnt_init])
@@ -429,9 +439,9 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
                 fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)[0]
                 if posterior_rl:
                     #conduct posterior reinforcement learning based on the initial inference from the latent representations
-                    # fa_parms = self.derive_robot_motion_from_img_posterior_rl(tar_img=img, init_fa_parms=fa_parms)
-                    fa_parms = self.derive_robot_motion_from_img_posterior_rl_latent(tar_img=img, init_latent_rep=z_rep[0][0])
-                    # fa_parms = self.derive_robot_motion_from_img_posterior_rl_cartesian(tar_img=img, init_fa_parms=fa_parms)
+                    # fa_parms = self.derive_robot_motion_from_img_posterior_rl(tar_img=img, tar_img_latent=z_rep[0][0], init_fa_parms=fa_parms)
+                    # fa_parms = self.derive_robot_motion_from_img_posterior_rl_latent(tar_img=img, tar_img_latent=z_rep[0][0], init_latent_rep=z_rep[0][0])
+                    fa_parms = self.derive_robot_motion_from_img_posterior_rl_cartesian(tar_img=img, tar_img_latent=z_rep[0][0], init_fa_parms=fa_parms)
 
                 jnt_motion = np.array(self.derive_jnt_traj_from_fa_parms(np.reshape(fa_parms, (7, -1))))
                 cart_motion = np.array(self.derive_cartesian_trajectory_from_fa_parms(np.reshape(fa_parms, (7, -1))))

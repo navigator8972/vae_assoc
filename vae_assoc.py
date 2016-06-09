@@ -390,11 +390,16 @@ class AssocVariationalAutoEncoder(object):
                                   feed_dict={x_sens:X_sens for x_sens, X_sens in zip(self.x, X)})
         return cost
 
-    def transform(self, X):
+    def transform(self, X, sens_idx=None):
         """Transform data by mapping it into the latent space."""
         # Note: This maps to mean of distribution, we could alternatively
         # sample from Gaussian distribution
-        latent_reps = [self.sess.run(z_mean, feed_dict={x_sens: X_sens}) for z_mean, x_sens, X_sens in zip(self.z_means, self.x, X)]
+        # sens_idx is either None or an integer, indicating the desired data modality
+        if sens_idx is None:
+            latent_reps = [self.sess.run(z_mean, feed_dict={x_sens: X_sens}) for z_mean, x_sens, X_sens in zip(self.z_means, self.x, X)]
+        else:
+            assert sens_idx < len(self.z_means)
+            latent_reps = self.sess.run(self.z_mean[sens_idx], feed_dict={self.x[sens_idx]: X})
         return latent_reps
 
     def generate(self, z_mu=None):
