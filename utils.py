@@ -38,7 +38,7 @@ def plot_single_stroke_char_or_digit(data):
     return fig, ax
 
 import Image
-import ImageOps
+# import ImageOps
 import os.path
 import time
 from collections import defaultdict
@@ -195,6 +195,7 @@ def extract_jnt_fa_parms(data=None, fname=None, only_digits=True, dtype=np.float
     return fa_parms, fa_mean, fa_std
 
 import cv2
+
 '''
 utility to threshold the character image
 '''

@@ -37,13 +37,13 @@ data_sets = dataset.construct_datasets(aug_data, validation_ratio=.1, test_ratio
 print 'Start training...'
 batch_sizes = [64]
 #n_z_array = [3, 5, 10, 20]
-n_z_array = [10]
+n_z_array = [5, 10, 15]
 # assoc_lambda_array = [1, 3, 5, 10]
 # assoc_lambda_array = [.1, .3, .5]
 #assoc_lambda_array = [15, 40]
 assoc_lambda_array = [8]
 #weights_array = [[2, 1], [5, 1], [10, 1]]
-weights_array=[[30, 1]] #work: 30
+weights_array=[[30, 1], [50, 1]] #work: 30
 
 for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z_array, assoc_lambda_array, weights_array):
 
@@ -89,8 +89,8 @@ for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z
     #create a new graph to ensure the resource is released after the training
     #change to clear the default graph
     tf.reset_default_graph()
-    vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], weights=weights, assoc_lambda = assoc_lambda, learning_rate=0.0001,
-              batch_size=batch_size, training_epochs=5000, display_step=5)
+    vae_assoc_model, cost_hist = vae_assoc.train(data_sets, [img_network_architecture, jnt_network_architecture], binary=[True, False], weights=weights, assoc_lambda = assoc_lambda, learning_rate=0.001,
+              batch_size=batch_size, training_epochs=1000, display_step=5)
 
     vae_assoc_model.save_model('output/model_batchsize{}_nz{}_lambda{}_weight{}.ckpt'.format(batch_size, n_z, assoc_lambda, weights[0]))
 

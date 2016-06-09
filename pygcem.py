@@ -52,7 +52,7 @@ class GaussianCEM:
             if options['dist_weighting_method'] == 'PI-BB':
                 #take exponential of the cost
                 h = options['dist_eliteness']
-                weights = np.exp(-h*(costs - min(costs)) / (max(costs) - min(costs)))
+                weights = np.exp(-h*(costs - min(costs)) / (max(costs) - min(costs) + 1e-6))
             elif options['dist_weighting_method'] == 'CEM' \
                 or options['dist_weighting_method'] == 'CMA-ES':
                 #CEM/CMA-ES heuristics, rank them, mu is the number of samples to select

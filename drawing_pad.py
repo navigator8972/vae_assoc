@@ -155,6 +155,32 @@ class DrawingPad(QMainWindow):
         self.setWindowTitle('DrawingPad')
 
         self.ctrl_pnl_layout = QVBoxLayout()
+        #<hyin/Jun-3rd-2016> two more canvas are needed to show the target image as well as the searching ones
+        self.fig_target = Figure(figsize=(1.62, 2.5), dpi=self.painter.dpi, facecolor="white")
+        self.fig_explore = Figure(figsize=(1.62, 2.5), dpi=self.painter.dpi, facecolor="white")
+
+        self.target_canvas = FigureCanvas(self.fig_target)
+        self.explore_canvas = FigureCanvas(self.fig_explore)
+
+        self.ax_target = self.fig_target.add_subplot(111, aspect='equal')
+        self.ax_explore = self.fig_explore.add_subplot(111, aspect='equal')
+
+        self.ax_target.set_aspect('equal')
+        self.ax_target.set_xticks([])
+        self.ax_target.set_yticks([])
+        self.ax_target.axis('off')
+
+        self.ax_explore.set_aspect('equal')
+        self.ax_explore.set_xticks([])
+        self.ax_explore.set_yticks([])
+        self.ax_explore.axis('off')
+
+        self.monitor_hbox_layout = QVBoxLayout()
+        self.monitor_hbox_layout.addWidget(self.target_canvas)
+        self.monitor_hbox_layout.addWidget(self.explore_canvas)
+
+        self.ctrl_pnl_layout.addLayout(self.monitor_hbox_layout, 3)
+
         #clean button
         #a button to clear the figure
         self.clean_btn = QPushButton('Clear')
@@ -186,6 +212,15 @@ class DrawingPad(QMainWindow):
         self.img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
         if self.on_send_usr_callback is not None:
             self.on_send_usr_callback(self)
+            #update the target canvas
+            self.ax_target.imshow(self.img_data.reshape((28, 28)))
+            self.target_canvas.draw()
+        return
+
+    def on_update_explore_canvas(self, img):
+        #callback routine to update the exploring canvas
+        self.ax_explore.imshow(img.reshape((28, 28)))
+        self.explore_canvas.draw()
         return
 
 import sys

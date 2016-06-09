@@ -10,7 +10,10 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 import Image
-import ImageOps
+import cv2
+
+#joblib for the parallel processing of the rollout simulations
+# from joblib import Parallel, delayed
 
 import rospy
 from sensor_msgs.msg import JointState
@@ -21,6 +24,7 @@ import baxter_writer as bw
 import dataset
 import vae_assoc
 import pygcem
+import pyrbf_funcapprox as pyrbf_fa
 
 import utils
 
@@ -31,6 +35,8 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         bw.BaxterWriter.__init__(self)
 
         self.vae_assoc_model = None
+        self.image_render_func = None
+
         self.initialize_tf_environment()
 
         self.initialize_dataset()
@@ -115,7 +121,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         #     self.vae_assoc_model.sess.close()
         tf.reset_default_graph()
         self.vae_assoc_model, self.cost_hist = vae_assoc.train(self.data_sets, [self.img_network_architecture, self.jnt_network_architecture], binary=[True, False], assoc_lambda = self.assoc_lambda, learning_rate=0.0001,
-                    batch_size=self.batch_size, training_epochs=5000, display_step=5)
+                    batch_size=self.batch_size, training_epochs=1000, display_step=5)
         return
 
     def save_model(self):
@@ -130,17 +136,17 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         self.vae_assoc_model.restore_model(folder, fname)
         return
 
-    def cost_robot_motion_fa_img_latent(self, latent_rep, auxargs):
+    def cost_robot_joint_motion_fa_img_latent(self, latent_rep, auxargs):
         z_mu = np.zeros((self.batch_size, len(latent_rep)))
         z_mu[0, :] = latent_rep
         x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
         fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)[0]
-        cost = self.cost_robot_motion_fa_img(fa_parms, auxargs)
+        cost = self.cost_robot_joint_motion_fa_img(fa_parms, auxargs)
         return cost
 
-    def cost_robot_motion_fa_img(self, fa_parms, auxargs):
+    def cost_robot_joint_motion_fa_img(self, fa_parms, auxargs):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(fa_parms, (self.robot_dynamics._num_jnts, -1)))
-        img_data, spatial_traj = self.derive_img_from_robot_motion(jnt_traj)
+        img_data, spatial_traj = self.derive_img_from_robot_jnt_motion(jnt_traj)
         tar_img = auxargs['tar_img']
         #cross entropy loss on the difference of the image
         # img_loss = np.sum(tar_img * np.log(1e-3 + img_data) + (1-tar_img) * np.log(1e-3 + 1 - img_data))
@@ -151,7 +157,82 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
         return cost
 
-    def derive_robot_motion_from_from_img_posterior_rl_latent(self, tar_img, init_latent_rep, n_rollouts=10, n_itrs=10):
+    def cost_robot_cart_motion_img(self, cart_motion, auxargs):
+        img_data = self.derive_img_from_robot_cart_motion(spatial_traj=cart_motion)
+        tar_img = auxargs['tar_img']
+        #cross entropy loss on the difference of the image
+        # img_loss = np.sum(tar_img * np.log(1e-3 + img_data) + (1-tar_img) * np.log(1e-3 + 1 - img_data))
+        img_loss = np.linalg.norm(img_data - tar_img)
+        # print img_loss, height_loss
+        cost = img_loss
+        return cost
+
+    def derive_robot_motion_from_img_posterior_rl_cartesian(self, tar_img, init_fa_parms, n_rollouts=50, n_itrs=10):
+        jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(init_fa_parms, (self.robot_dynamics._num_jnts, -1)))
+        spatial_traj = np.array(self.derive_cartesian_trajectory(jnt_traj))
+
+        auxargs = {'tar_img':tar_img, 'height': np.mean(spatial_traj[:, 2])}
+
+        #init resultant image...
+        init_image_data = self.derive_img_from_robot_cart_motion(spatial_traj)
+        self.image_render_func(init_image_data)
+
+        #get the initial Cartesian trajectory function approximators
+        cart_funcapproxs = [ pyrbf_fa.PyRBF_FunctionApproximator(rbf_type='sigmoid', K=20, normalize=True) for i in range(2) ]
+        phases = np.linspace(0, 1, spatial_traj.shape[0])
+        fa_0 = cart_funcapproxs[0].fit(phases, spatial_traj[:, 0])
+        fa_1 = cart_funcapproxs[1].fit(phases, spatial_traj[:, 1])
+
+        #apply the linear constraint to fix the initial point
+        for func_approx, spatial_init in zip(cart_funcapproxs, spatial_traj[0, 0:2]):
+            func_approx.set_linear_equ_constraints([0], [spatial_init])
+
+        init_fa_parms = np.concatenate([fa_0, fa_1])
+        #posterior RL procedure to refine the motion
+        gcem = pygcem.GaussianCEM(x0=init_fa_parms, eliteness=10, covar_full=False, covar_learning_rate=1, covar_scale=None, covar_bounds=[0.1])
+        gcem.covar *= 0.00001
+        curr_mean = gcem.mean
+
+        for itr in range(n_itrs):
+            #generate samples to take rollouts
+            mean_fa_parms = np.reshape(gcem.mean, (2, -1))
+            covars_fa_parms = np.reshape(np.diag(gcem.covar), (2, -1))
+            rollout_fa_parms = [func_approx.gaussian_sampling(theta=mean_fa_parm, noise=np.diag(covar_fa_parm), n_samples=n_rollouts)
+                for func_approx, mean_fa_parm, covar_fa_parm in zip(cart_funcapproxs, mean_fa_parms, covars_fa_parms)]
+
+            rollout_cart_motions = [[func_approx.evaluate(z=phases, theta=fa_parm, trunc_limit=False) for fa_parm in fa_parms] for func_approx, fa_parms in zip(cart_funcapproxs, rollout_fa_parms)]
+            rollout_cart_motions = [np.array([rollout_cart_motions[0][i], rollout_cart_motions[1][i]]).T for i in range(n_rollouts)]
+
+            #concatenate the parms for each dof
+            rollout_fa_parms = np.concatenate(rollout_fa_parms, axis=1)
+
+            costs = [self.cost_robot_cart_motion_img(cart_motion, auxargs) for cart_motion in rollout_cart_motions]
+            curr_avg_cost = np.mean(costs)
+            print 'Avg cost: ', curr_avg_cost
+
+            gcem.fit(rollout_fa_parms, costs)
+            diff = curr_mean - gcem.mean
+
+            if np.linalg.norm(diff) < 1e-6:
+                break
+            curr_mean = gcem.mean
+            #update the mean motion image
+            mean_fa_parms = np.reshape(gcem.mean, (2, -1))
+            cart_motion = [func_approx.evaluate(z=phases, theta=fa_parm, trunc_limit=False) for fa_parm in mean_fa_parms]
+            cart_motion = np.array(cart_motion).T
+            img_data = self.derive_img_from_robot_cart_motion(cart_motion)
+            self.image_render_func(img_data)
+
+        mean_fa_parms = np.reshape(gcem.mean, (2, -1))
+        mean_cart_motion = np.array([func_approx.evaluate(z=phases, theta=fa_parm, trunc_limit=False) for func_approx, fa_parm in zip(cart_funcapproxs, mean_fa_parms)])
+        res_cart_motion = np.vstack([mean_cart_motion, spatial_traj[:, 2]]).T
+
+        jnt_traj = self.derive_ik_trajectory(res_cart_motion)
+        fa_parms = np.array(self.derive_fa_parms_from_jnt_traj(jnt_traj)).flatten()
+
+        return fa_parms
+
+    def derive_robot_motion_from_img_posterior_rl_latent(self, tar_img, init_latent_rep, n_rollouts=10, n_itrs=10):
         #do posterior RL but explore within the latent representation space...
         z_mu = np.zeros((self.batch_size, len(init_latent_rep)))
         z_mu[0, :] = init_latent_rep
@@ -167,11 +248,14 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         gcem.covar *= 0.01
         curr_mean = gcem.mean
         print curr_mean
+        # n_jobs = 4
 
         for itr in range(n_itrs):
             #generate samples to take rollouts
             rollout_latent_reps = gcem.sample(n_samples=n_rollouts)
-            costs = [self.cost_robot_motion_fa_img_latent(latent_rep, auxargs) for latent_rep in rollout_latent_reps]
+            costs = [self.cost_robot_joint_motion_fa_img_latent(latent_rep, auxargs) for latent_rep in rollout_latent_reps]
+            #try joblib to parallelize the rollouts
+            # costs = Parallel(n_jobs=n_jobs) (delayed(self.cost_robot_joint_motion_fa_img_latent) (latent_rep, auxargs) for latent_rep in rollout_latent_reps)
             curr_avg_cost = np.mean(costs)
             print 'Avg cost: ', curr_avg_cost
 
@@ -180,13 +264,22 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
             if np.linalg.norm(diff) < 1e-6:
                 break
             curr_mean = gcem.mean
+            #update the mean motion image
+            z_mu = np.zeros((self.batch_size, len(curr_mean)))
+            z_mu[0, :] = curr_mean
+            x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
+            fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)[0]
+
+            jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(fa_parms, (self.robot_dynamics._num_jnts, -1)))
+            img_data, spatial_traj = self.derive_img_from_robot_jnt_motion(jnt_traj)
+            self.image_render_func(img_data)
 
         z_mu[0, :] = curr_mean
         x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
         res_fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)[0]
         return res_fa_parms
 
-    def derive_robot_motion_from_from_img_posterior_rl(self, tar_img, init_fa_parms, n_rollouts=100, n_itrs=5):
+    def derive_robot_motion_from_img_posterior_rl(self, tar_img, init_fa_parms, n_rollouts=20, n_itrs=10):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(init_fa_parms, (self.robot_dynamics._num_jnts, -1)))
         spatial_traj = self.derive_cartesian_trajectory(jnt_traj)
         spatial_traj = np.array(spatial_traj)
@@ -208,7 +301,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
                 for func_approx, mean_fa_parm, covar_fa_parm in zip(self.func_approxs, mean_fa_parms, covars_fa_parms)]
             #concatenate the parms for each dof
             rollout_fa_parms = np.concatenate(rollout_fa_parms, axis=1)
-            costs = [self.cost_robot_motion_fa_img(fa_parm, auxargs) for fa_parm in rollout_fa_parms]
+            costs = [self.cost_robot_joint_motion_fa_img(fa_parm, auxargs) for fa_parm in rollout_fa_parms]
             curr_avg_cost = np.mean(costs)
             print 'Avg cost: ', curr_avg_cost
 
@@ -217,19 +310,25 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
             if np.linalg.norm(diff) < 1e-6:
                 break
             curr_mean = gcem.mean
+            #update the mean motion image
+            jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(curr_mean, (self.robot_dynamics._num_jnts, -1)))
+            img_data, _ = self.derive_img_from_robot_jnt_motion(jnt_traj)
+            self.image_render_func(img_data)
 
         return curr_mean
 
-    def derive_img_from_robot_motion(self, jnt_traj):
-        # to simulate drawing the letter image from the given joint movement
-        spatial_traj = self.derive_cartesian_trajectory(jnt_traj)
-
+    def derive_img_from_robot_cart_motion(self, spatial_traj):
+        #remember to first shift and scale the spatial traj
+        char_traj = spatial_traj[:, 0:2]
+        char_traj = char_traj - np.mean(char_traj, axis=0)
+        char_traj = char_traj / self.scale
+        # to simulate drawing the letter image from the given cartesian movement
         fig = plt.figure(frameon=False, figsize=(4,4), dpi=100)
         ax = plt.Axes(fig, [0., 0., 1., 1.])
         ax.set_axis_off()
         fig.add_axes(ax)
-        spatial_traj = np.array(spatial_traj)
-        ax.plot(-spatial_traj[:, 1], spatial_traj[:, 0], linewidth=12.0)
+        # spatial_traj = np.array(spatial_traj)
+        ax.plot(-char_traj[:, 1], char_traj[:, 0], 'k', linewidth=12.0)
         ax.set_xlim([-1.5, 1.5])
         ax.set_ylim([-1.5, 1.5])
 
@@ -240,19 +339,44 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         w,h = fig.canvas.get_width_height()
 
         buf = np.fromstring ( fig.canvas.tostring_argb(), dtype=np.uint8 )
-
         buf.shape = ( w, h, 4 )
+        # cv2.imwrite('test.png', buf)
+
+        def rgba2rgb(input_img):
+            #input image is ARGB, white background, return BGR
+            alpha = input_img[:, :, 0] / 255.
+            output_img = np.array([(1 - alpha)*255 + alpha*input_img[:, :, 3-i] for i in range(3)], dtype=np.uint8)
+            output_img = np.rollaxis(output_img, 0, 3)
+            return output_img
 
         # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
-        buf = np.roll ( buf, 3, axis = 2 )
+        # buf = np.roll ( buf, 3, axis = 2 )
 
-        #prepare an image
-        img = Image.fromstring( "RGBA", ( w ,h ), buf.tostring() )
-        img_gs = img.convert('L')
+        # print buf
+        # print np.count_nonzero(buf > 0)
+        # print np.count_nonzero(buf[:, :, 0] > 0)
+        # print np.count_nonzero(buf[:, :, 1] > 0)
+        # print np.count_nonzero(buf[:, :, 2] > 0)
+        # print np.count_nonzero(buf[:, :, 3] > 0)
+        # # prepare an image
+        # img = Image.fromstring( "RGBA", ( w ,h ), buf.tostring() )
+        # img.save('test.png')
+        # img = Image.fromstring( "RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb() )
+        # img_cv = buf[:, :, 3::-1]
 
-        thumbnail_size = (28, 28)
-        img_gs.thumbnail(thumbnail_size)
-        img_gs_inv = ImageOps.invert(img_gs)
+        img_cv = rgba2rgb(buf)
+        # print img_cv
+        # print np.count_nonzero(img_cv > 0)
+        #
+        # print img_cv.shape
+        # cv2.imwrite('test.png', img_cv)
+
+        img_gs = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
+        # print np.count_nonzero(img_gs > 0)
+        img_gs_inv = 255 - img_gs
+
+        cv2.imwrite('test.png', img_gs_inv)
 
         img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_gs_inv))
         # img_gs_inv_thumbnail = img_gs_inv
@@ -261,15 +385,24 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
 
         plt.close(fig)
+
+        return img_data
+
+    def derive_img_from_robot_jnt_motion(self, jnt_traj):
+        # to simulate drawing the letter image from the given joint movement
+        spatial_traj = np.array(self.derive_cartesian_trajectory(jnt_traj))
+
+        img_data = self.derive_img_from_robot_cart_motion(spatial_traj)
+
         return img_data, spatial_traj
 
-    def derive_img_from_robot_motion_fa(self, fa_parms):
+    def derive_img_from_robot_jnt_motion_fa(self, fa_parms):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(fa_parms)
-        img_data, spatial_traj = self.derive_img_from_robot_motion(jnt_traj)
+        img_data, spatial_traj = self.derive_img_from_robot_jnt_motion(jnt_traj)
 
         return img_data, spatial_traj
 
-    def derive_robot_motion_from_from_img(self, img, posterior_rl=True):
+    def derive_robot_motion_from_img(self, img, posterior_rl=True):
         if self.vae_assoc_model is not None:
             if len(img.shape) == 1:
                 assert len(img) == 784
@@ -296,8 +429,9 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
                 fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)[0]
                 if posterior_rl:
                     #conduct posterior reinforcement learning based on the initial inference from the latent representations
-                    # fa_parms = self.derive_robot_motion_from_from_img_posterior_rl(tar_img=img, init_fa_parms=fa_parms)
-                    fa_parms = self.derive_robot_motion_from_from_img_posterior_rl_latent(tar_img=img, init_latent_rep=z_rep[0][0])
+                    # fa_parms = self.derive_robot_motion_from_img_posterior_rl(tar_img=img, init_fa_parms=fa_parms)
+                    fa_parms = self.derive_robot_motion_from_img_posterior_rl_latent(tar_img=img, init_latent_rep=z_rep[0][0])
+                    # fa_parms = self.derive_robot_motion_from_img_posterior_rl_cartesian(tar_img=img, init_fa_parms=fa_parms)
 
                 jnt_motion = np.array(self.derive_jnt_traj_from_fa_parms(np.reshape(fa_parms, (7, -1))))
                 cart_motion = np.array(self.derive_cartesian_trajectory_from_fa_parms(np.reshape(fa_parms, (7, -1))))
@@ -329,6 +463,7 @@ def main(use_gui=False):
     curr_dir = os.path.dirname(os.path.realpath(__file__))
 
     bvaw.load_model(os.path.join(curr_dir, 'output/work/non_cnn/1000epoches'), 'model_batchsize64_nz10_lambda8_weight30.ckpt')
+    # bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize64_nz20_lambda8_weight80.ckpt')
     print 'Number of variabels:', len(tf.all_variables())
 
     #prepare ros stuff
@@ -345,7 +480,7 @@ def main(use_gui=False):
 
         test_sample = bvaw.data_sets.test.next_batch(bvaw.batch_size)[0] #the first is feature, the second is the label
         test_img_sample = test_sample[:, :784]
-        fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_from_img(test_img_sample)
+        fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(test_img_sample)
 
         raw_input('ENTER to start the test...')
 
@@ -381,9 +516,11 @@ def main(use_gui=False):
         app = QApplication(sys.argv)
         dpad = dp.DrawingPad()
 
+        bvaw.image_render_func = dpad.on_update_explore_canvas
+
         #threading function
         def threading_func(img_data, writer, rate, clean_pub, write_pub):
-            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_from_img(img_data)
+            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(img_data)
             print 'Sending joint command to a viewer...'
             cln_pub.publish(Empty())
             for k in range(10):
