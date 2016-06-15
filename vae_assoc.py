@@ -399,7 +399,7 @@ class AssocVariationalAutoEncoder(object):
             latent_reps = [self.sess.run(z_mean, feed_dict={x_sens: X_sens}) for z_mean, x_sens, X_sens in zip(self.z_means, self.x, X)]
         else:
             assert sens_idx < len(self.z_means)
-            latent_reps = self.sess.run(self.z_mean[sens_idx], feed_dict={self.x[sens_idx]: X})
+            latent_reps = self.sess.run(self.z_means[sens_idx], feed_dict={self.x[sens_idx]: X})
         return latent_reps
 
     def generate(self, z_mu=None):

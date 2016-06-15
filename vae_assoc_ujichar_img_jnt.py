@@ -37,13 +37,15 @@ data_sets = dataset.construct_datasets(aug_data, validation_ratio=.1, test_ratio
 print 'Start training...'
 batch_sizes = [64]
 #n_z_array = [3, 5, 10, 20]
-n_z_array = [5, 10, 15]
+n_z_array = [4]
 # assoc_lambda_array = [1, 3, 5, 10]
 # assoc_lambda_array = [.1, .3, .5]
 #assoc_lambda_array = [15, 40]
 assoc_lambda_array = [8]
 #weights_array = [[2, 1], [5, 1], [10, 1]]
 weights_array=[[30, 1], [50, 1]] #work: 30
+
+plt.style.use('ggplot')
 
 for batch_size, n_z, assoc_lambda, weights in itertools.product(batch_sizes, n_z_array, assoc_lambda_array, weights_array):
 

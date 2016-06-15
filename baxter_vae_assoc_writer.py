@@ -43,9 +43,9 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         return
 
     def initialize_tf_environment(self):
-        self.batch_size = 100
-        self.n_z = 10
-        self.assoc_lambda = 15
+        self.batch_size = 64
+        self.n_z = 4
+        self.assoc_lambda = 50
 
         self.img_network_architecture = \
             dict(scope='image',
@@ -163,7 +163,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         #norm of this encoding: euclidean distance from the mapping of the target image
         latent_feature_loss = np.linalg.norm(z_encoding - auxargs['tar_img_latent'])
         #use only this?
-        cost = latent_feature_loss
+        cost = .3*cost + .7*latent_feature_loss
 
         return cost
 
@@ -177,7 +177,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         cost = img_loss
         return cost
 
-    def derive_robot_motion_from_img_posterior_rl_cartesian(self, tar_img, tar_img_latent, init_fa_parms, n_rollouts=50, n_itrs=10):
+    def derive_robot_motion_from_img_posterior_rl_cartesian(self, tar_img, tar_img_latent, init_fa_parms, n_rollouts=50, n_itrs=20):
         jnt_traj = self.derive_jnt_traj_from_fa_parms(np.reshape(init_fa_parms, (self.robot_dynamics._num_jnts, -1)))
         spatial_traj = np.array(self.derive_cartesian_trajectory(jnt_traj))
 
@@ -359,27 +359,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
             output_img = np.rollaxis(output_img, 0, 3)
             return output_img
 
-        # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
-        # buf = np.roll ( buf, 3, axis = 2 )
-
-        # print buf
-        # print np.count_nonzero(buf > 0)
-        # print np.count_nonzero(buf[:, :, 0] > 0)
-        # print np.count_nonzero(buf[:, :, 1] > 0)
-        # print np.count_nonzero(buf[:, :, 2] > 0)
-        # print np.count_nonzero(buf[:, :, 3] > 0)
-        # # prepare an image
-        # img = Image.fromstring( "RGBA", ( w ,h ), buf.tostring() )
-        # img.save('test.png')
-        # img = Image.fromstring( "RGB", fig.canvas.get_width_height(), fig.canvas.tostring_rgb() )
-        # img_cv = buf[:, :, 3::-1]
-
         img_cv = rgba2rgb(buf)
-        # print img_cv
-        # print np.count_nonzero(img_cv > 0)
-        #
-        # print img_cv.shape
-        # cv2.imwrite('test.png', img_cv)
 
         img_gs = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
 
@@ -389,8 +369,6 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         cv2.imwrite('test.png', img_gs_inv)
 
         img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_gs_inv))
-        # img_gs_inv_thumbnail = img_gs_inv
-        # img.show()
 
         img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
 
@@ -442,6 +420,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
                     # fa_parms = self.derive_robot_motion_from_img_posterior_rl(tar_img=img, tar_img_latent=z_rep[0][0], init_fa_parms=fa_parms)
                     # fa_parms = self.derive_robot_motion_from_img_posterior_rl_latent(tar_img=img, tar_img_latent=z_rep[0][0], init_latent_rep=z_rep[0][0])
                     fa_parms = self.derive_robot_motion_from_img_posterior_rl_cartesian(tar_img=img, tar_img_latent=z_rep[0][0], init_fa_parms=fa_parms)
+                    pass
 
                 jnt_motion = np.array(self.derive_jnt_traj_from_fa_parms(np.reshape(fa_parms, (7, -1))))
                 cart_motion = np.array(self.derive_cartesian_trajectory_from_fa_parms(np.reshape(fa_parms, (7, -1))))
@@ -453,6 +432,101 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
 
             return fa_parms, jnt_motion, cart_motion
+
+        return None, None, None
+
+    def cost_img_img_latent(self, latent_rep, auxargs):
+        z_mu = np.zeros((self.batch_size, len(latent_rep)))
+        z_mu[0, :] = latent_rep
+        x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
+        img_recover = auxargs['img_incomplete'].reshape((28, 28))
+        fraction_idx = auxargs['fraction_idx']
+        img_recover[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)] = \
+                x_reconstr_means[0][0].reshape((28, 28))[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)]
+
+        #here the cost is evaluated in the latent space
+        # input_img_data = np.random.rand(self.batch_size, 784) - 0.5
+        # input_img_data[0] = img_recover.flatten()
+        # z_encoding = self.vae_assoc_model.transform(X=input_img_data, sens_idx=0)[0]
+        # #norm of this encoding: euclidean distance from the mapping of the target image
+        # latent_feature_loss = np.linalg.norm(z_encoding)
+        # #use only this?
+        # cost = latent_feature_loss
+
+        #try the cost evaluated in the image space
+        cost = np.linalg.norm(x_reconstr_means[0][0].reshape((28, 28)) - img_recover) / 784
+        return cost
+
+    def derive_img_from_incomplete_img(self, img_incomplete, fraction_idx, n_itrs=20, n_rollouts=20):
+        if self.vae_assoc_model is not None:
+            if len(img_incomplete.shape) == 1:
+                assert len(img_incomplete) == 784
+                #construct fake data to pad the batch
+                input_img_data = np.random.rand(self.batch_size, 784) - 0.5
+                input_img_data[0] = img_incomplete
+            else:
+                assert img_incomplete.shape[0] == self.batch_size
+                assert img_incomplete.shape[1] == 784
+
+                input_img_data = img_incomplete
+
+            #construct input with fake joint parms
+            X = [input_img_data, np.random.rand(self.batch_size, 147) - 0.5]
+            #use recognition model to infer the latent representation
+            z_rep = self.vae_assoc_model.transform(X)
+            #now remember to only use the z_rep of img to
+            #generate the joint output
+            # x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_rep[0])
+            init_latent_rep = z_rep[0][0]
+
+            #do inference via cross-entropy optimization
+            auxargs = {'img_incomplete':img_incomplete, 'fraction_idx': fraction_idx}
+
+            #posterior RL procedure to refine the motion
+            gcem = pygcem.GaussianCEM(x0=init_latent_rep, eliteness=10, covar_full=False, covar_learning_rate=1, covar_scale=None, covar_bounds=[0.1])
+            gcem.covar *= 0.05
+            curr_mean = gcem.mean
+            print curr_mean
+            # n_jobs = 4
+
+            for itr in range(n_itrs):
+                #generate samples to take rollouts
+                rollout_latent_reps = gcem.sample(n_samples=n_rollouts)
+                costs = [self.cost_img_img_latent(latent_rep, auxargs) for latent_rep in rollout_latent_reps]
+                #try joblib to parallelize the rollouts
+                # costs = Parallel(n_jobs=n_jobs) (delayed(self.cost_robot_joint_motion_fa_img_latent) (latent_rep, auxargs) for latent_rep in rollout_latent_reps)
+                curr_avg_cost = np.mean(costs)
+                print 'Avg cost: ', curr_avg_cost
+
+                gcem.fit(rollout_latent_reps, costs)
+                diff = curr_mean - gcem.mean
+                if np.linalg.norm(diff) < 1e-6:
+                    break
+                curr_mean = gcem.mean
+                #update the recovered image
+                z_mu = np.zeros((self.batch_size, len(curr_mean)))
+                z_mu[0, :] = curr_mean
+                x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
+                img_recover = img_incomplete.reshape((28, 28))
+                img_recover[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)] = \
+                        x_reconstr_means[0][0].reshape((28, 28))[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)]
+                self.image_render_func(img_recover.flatten())
+
+            z_mu[0, :] = curr_mean
+            x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
+            img_recover = img_incomplete.reshape((28, 28))
+            img_recover[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)] = \
+                    x_reconstr_means[0][0].reshape((28, 28))[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)]
+            return img_recover
+
+        return None
+
+    def derive_robot_motion_from_incomplete_img(self, img, img_incomplete, fraction_idx):
+
+        img_est = self.derive_img_from_incomplete_img(img_incomplete, fraction_idx)
+
+        if img_est is not None:
+            pass
 
         return None, None, None
 
@@ -472,8 +546,8 @@ def main(use_gui=False):
 
     curr_dir = os.path.dirname(os.path.realpath(__file__))
 
-    bvaw.load_model(os.path.join(curr_dir, 'output/work/non_cnn/1000epoches'), 'model_batchsize64_nz10_lambda8_weight30.ckpt')
-    # bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize64_nz20_lambda8_weight80.ckpt')
+    # bvaw.load_model(os.path.join(curr_dir, 'output/work/non_cnn/1000epoches'), 'model_batchsize64_nz10_lambda8_weight30.ckpt')
+    bvaw.load_model(os.path.join(curr_dir, 'output'), 'model_batchsize64_nz4_lambda8_weight50.ckpt')
     print 'Number of variabels:', len(tf.all_variables())
 
     #prepare ros stuff
@@ -550,6 +624,30 @@ def main(use_gui=False):
             return
 
         dpad.on_send_usr_callback = send_msg
+
+        def threading_func_incomplete(img_data, img_incomplete_data, fraction_idx, writer, rate, clean_pub, write_pub):
+            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_incomplete_img(img_data, img_incomplete_data, fraction_idx)
+            print 'Sending joint command to a viewer...'
+            if jnt_motion is None:
+                print 'Invalid joint command, skip the publish...'
+                return
+            cln_pub.publish(Empty())
+            for k in range(10):
+                rate.sleep()
+            jnt_msg = JointState()
+            for cmd in jnt_motion:
+                jnt_msg.position = cmd
+                jnt_pub.publish(jnt_msg)
+                rate.sleep()
+            return
+
+        def send_msg_incomplete(gui):
+            t = threading.Thread(target=threading_func_incomplete, args = (gui.img_data, gui.img_incomplete_data, gui.fraction_idx, bvaw, r, cln_pub, jnt_pub))
+            t.daemon = True
+            t.start()
+            return
+
+        dpad.on_send_incomplete_usr_callback = send_msg_incomplete
 
         dpad.show()
         print 'Start a drawing pad...'

@@ -192,10 +192,19 @@ class DrawingPad(QMainWindow):
         self.ctrl_pnl_layout.addWidget(self.send_btn)
         self.send_btn.clicked.connect(self.on_send_button_clicked)
 
+        #send corrupted image button
+        self.send_incomplete_btn = QPushButton('Send Incomplete')
+        self.ctrl_pnl_layout.addWidget(self.send_incomplete_btn)
+        self.send_incomplete_btn.clicked.connect(self.on_send_incomplete_button_clicked)
+
         self.main_hbox.addLayout(self.ctrl_pnl_layout, 3)
 
         self.img_data = None
         self.on_send_usr_callback = None
+
+        self.img_incomplete_data = None
+        self.fraction_idx = None
+        self.on_send_incomplete_usr_callback = None
         return
 
     def on_send_button_clicked(self, event):
@@ -212,6 +221,32 @@ class DrawingPad(QMainWindow):
         self.img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
         if self.on_send_usr_callback is not None:
             self.on_send_usr_callback(self)
+            #update the target canvas
+            self.ax_target.imshow(self.img_data.reshape((28, 28)))
+            self.target_canvas.draw()
+        return
+
+    def on_send_incomplete_button_clicked(self, event):
+        img_data = self.painter.get_image_data()
+        #prepare an image
+        w, h, d = img_data.shape
+        img = Image.fromstring( "RGBA", ( w ,h ), img_data.tostring() )
+        img_gs = img.convert('L')
+        # thumbnail_size = (28, 28)
+        # img_gs.thumbnail(thumbnail_size)
+        img_gs_inv = ImageOps.invert(img_gs)
+        img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_gs_inv))
+        # img.show()
+        self.img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
+
+        #cover a fraction of the image to produce incomplete data
+        self.fraction_idx = (np.random.rand(2) > 0.5).astype(int)
+        self.img_incomplete_data = self.img_data.reshape((28, 28))
+        self.img_incomplete_data[14*self.fraction_idx[0]:14*(self.fraction_idx[0]+1), 14*self.fraction_idx[1]:14*(self.fraction_idx[1]+1)] = 0
+        self.img_incomplete_data = self.img_incomplete_data.flatten()
+
+        if self.on_send_incomplete_usr_callback is not None:
+            self.on_send_incomplete_usr_callback(self)
             #update the target canvas
             self.ax_target.imshow(self.img_data.reshape((28, 28)))
             self.target_canvas.draw()
