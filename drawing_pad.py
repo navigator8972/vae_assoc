@@ -1,3 +1,8 @@
+import sys
+import os
+import time
+import cPickle as cp
+
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 
@@ -197,6 +202,11 @@ class DrawingPad(QMainWindow):
         self.ctrl_pnl_layout.addWidget(self.send_incomplete_btn)
         self.send_incomplete_btn.clicked.connect(self.on_send_incomplete_button_clicked)
 
+        #save the process data button
+        self.save_btn = QPushButton('Save')
+        self.ctrl_pnl_layout.addWidget(self.save_btn)
+        self.save_btn.clicked.connect(self.on_save)
+
         self.main_hbox.addLayout(self.ctrl_pnl_layout, 3)
 
         self.img_data = None
@@ -205,6 +215,9 @@ class DrawingPad(QMainWindow):
         self.img_incomplete_data = None
         self.fraction_idx = None
         self.on_send_incomplete_usr_callback = None
+
+        #record for potential saving...
+        self.record = None
         return
 
     def on_send_button_clicked(self, event):
@@ -256,6 +269,23 @@ class DrawingPad(QMainWindow):
         #callback routine to update the exploring canvas
         self.ax_explore.imshow(img.reshape((28, 28)))
         self.explore_canvas.draw()
+        return
+
+    def on_save(self):
+        if self.record is None:
+            print 'The record is not initialized.'
+        else:
+            #time stampe for naming
+            timestr = time.strftime("%Y%m%d_%H%M%S")
+            curr_dir = os.path.dirname(os.path.realpath(__file__))
+            default_dir = os.path.join(curr_dir, 'res')
+            fpath = os.path.join(default_dir, 'res_{0}.pkl'.format(timestr))
+            cp.dump(self.record, open(fpath, 'wb'))
+            print 'Results saved into {0}'.format(fpath)
+        return
+
+    def set_record(self, rec):
+        self.record = rec
         return
 
 import sys

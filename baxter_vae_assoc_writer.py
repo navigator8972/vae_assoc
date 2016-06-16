@@ -1,4 +1,5 @@
 import itertools
+from collections import defaultdict
 import cPickle as cp
 
 import numpy as np
@@ -36,6 +37,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
         self.vae_assoc_model = None
         self.image_render_func = None
+        self.process_hist = None
 
         self.initialize_tf_environment()
 
@@ -187,6 +189,8 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         init_image_data = self.derive_img_from_robot_cart_motion(spatial_traj)
         self.image_render_func(init_image_data)
 
+        #save them in
+
         #get the initial Cartesian trajectory function approximators
         cart_funcapproxs = [ pyrbf_fa.PyRBF_FunctionApproximator(rbf_type='sigmoid', K=20, normalize=True) for i in range(2) ]
         phases = np.linspace(0, 1, spatial_traj.shape[0])
@@ -223,15 +227,25 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
             gcem.fit(rollout_fa_parms, costs)
             diff = curr_mean - gcem.mean
 
-            if np.linalg.norm(diff) < 1e-6:
-                break
-            curr_mean = gcem.mean
             #update the mean motion image
             mean_fa_parms = np.reshape(gcem.mean, (2, -1))
             cart_motion = [func_approx.evaluate(z=phases, theta=fa_parm, trunc_limit=False) for fa_parm in mean_fa_parms]
             cart_motion = np.array(cart_motion).T
             img_data = self.derive_img_from_robot_cart_motion(cart_motion)
             self.image_render_func(img_data)
+
+            #save them
+            self.process_hist['motion_mean_fa_parms'].append(curr_mean)
+            self.process_hist['motion_costs'].append(costs)
+            self.process_hist['motion_avg_cost'].append(curr_avg_cost)
+            self.process_hist['motion_cart_hist'].append(cart_motion)
+            self.process_hist['img_from_motion'].append(img_data)
+
+            if np.linalg.norm(diff) < 1e-6:
+                break
+
+            curr_mean = gcem.mean
+
 
         mean_fa_parms = np.reshape(gcem.mean, (2, -1))
         mean_cart_motion = np.array([func_approx.evaluate(z=phases, theta=fa_parm, trunc_limit=False) for func_approx, fa_parm in zip(cart_funcapproxs, mean_fa_parms)])
@@ -390,27 +404,35 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
 
         return img_data, spatial_traj
 
-    def derive_robot_motion_from_img(self, img, posterior_rl=True):
+    def derive_robot_motion_from_img(self, img, latent_rep=None, posterior_rl=True, rec_saver=None):
         if self.vae_assoc_model is not None:
-            if len(img.shape) == 1:
-                assert len(img) == 784
-                #construct fake data to pad the batch
-                input_img_data = np.random.rand(self.batch_size, 784) - 0.5
-                input_img_data[0] = img
+            if latent_rep is not None:
+                z_rep = [np.random.rand(self.batch_size, self.n_z), np.random.rand(self.batch_size, self.n_z)]
+                z_rep[0][0] = latent_rep
             else:
-                assert img.shape[0] == self.batch_size
-                assert img.shape[1] == 784
+                #retrieve the latent representation
+                if len(img.shape) == 1:
+                    assert len(img) == 784
+                    #construct fake data to pad the batch
+                    input_img_data = np.random.rand(self.batch_size, 784) - 0.5
+                    input_img_data[0] = img
+                else:
+                    assert img.shape[0] == self.batch_size
+                    assert img.shape[1] == 784
 
-                input_img_data = img
+                    input_img_data = img
 
-            #construct input with fake joint parms
-            X = [input_img_data, np.random.rand(self.batch_size, 147) - 0.5]
+                #construct input with fake joint parms
+                X = [input_img_data, np.random.rand(self.batch_size, 147) - 0.5]
 
-            #use recognition model to infer the latent representation
-            z_rep = self.vae_assoc_model.transform(X)
+                #use recognition model to infer the latent representation
+                z_rep = self.vae_assoc_model.transform(X)
             #now remember to only use the z_rep of img to
             #generate the joint output
             x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_rep[0])
+
+            self.process_hist['motion_input_img'] = img
+            self.process_hist['motion_init_latent'] = z_rep[0][0]
 
             if len(img.shape) == 1:
                 #take the first joint fa param and restore it for the evaluation
@@ -419,17 +441,23 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
                     #conduct posterior reinforcement learning based on the initial inference from the latent representations
                     # fa_parms = self.derive_robot_motion_from_img_posterior_rl(tar_img=img, tar_img_latent=z_rep[0][0], init_fa_parms=fa_parms)
                     # fa_parms = self.derive_robot_motion_from_img_posterior_rl_latent(tar_img=img, tar_img_latent=z_rep[0][0], init_latent_rep=z_rep[0][0])
+                    print 'Refining the motion with RL steps...'
                     fa_parms = self.derive_robot_motion_from_img_posterior_rl_cartesian(tar_img=img, tar_img_latent=z_rep[0][0], init_fa_parms=fa_parms)
                     pass
 
                 jnt_motion = np.array(self.derive_jnt_traj_from_fa_parms(np.reshape(fa_parms, (7, -1))))
                 cart_motion = np.array(self.derive_cartesian_trajectory_from_fa_parms(np.reshape(fa_parms, (7, -1))))
+
+                self.process_hist['motion_fa_parms'] = fa_parms
+                self.process_hist['motion_jnt'] = jnt_motion
+                self.process_hist['motion_cart'] = cart_motion
             else:
                 #take all the samples if the input is a batch
                 fa_parms = (x_reconstr_means[1] * self.fa_std + self.fa_mean)
                 jnt_motion = [np.array(self.derive_jnt_traj_from_fa_parms(np.reshape(fa, (7, -1)))) for fa in fa_parms]
                 cart_motion = [np.array(self.derive_cartesian_trajectory_from_fa_parms(np.reshape(fa, (7, -1)))) for fa in fa_parms]
-
+            if rec_saver is not None:
+                rec_saver(self.process_hist)
 
             return fa_parms, jnt_motion, cart_motion
 
@@ -499,35 +527,55 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
                 print 'Avg cost: ', curr_avg_cost
 
                 gcem.fit(rollout_latent_reps, costs)
-                diff = curr_mean - gcem.mean
-                if np.linalg.norm(diff) < 1e-6:
-                    break
-                curr_mean = gcem.mean
+
                 #update the recovered image
-                z_mu = np.zeros((self.batch_size, len(curr_mean)))
-                z_mu[0, :] = curr_mean
+                z_mu = np.zeros((self.batch_size, len(gcem.mean)))
+                z_mu[0, :] = gcem.mean
                 x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
                 img_recover = img_incomplete.reshape((28, 28))
                 img_recover[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)] = \
                         x_reconstr_means[0][0].reshape((28, 28))[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)]
                 self.image_render_func(img_recover.flatten())
 
+                #record them in the history
+                self.process_hist['img_mean_latent_rep'].append(gcem.mean)
+                self.process_hist['img_costs'].append(costs)
+                self.process_hist['img_avg_cost'].append(curr_avg_cost)
+                self.process_hist['img_from_latent_rep'].append(x_reconstr_means[0][0])
+                self.process_hist['img_recover'].append(img_recover.flatten())
+
+                diff = curr_mean - gcem.mean
+                if np.linalg.norm(diff) < 1e-6:
+                    break
+                curr_mean = gcem.mean
+
+
             z_mu[0, :] = curr_mean
             x_reconstr_means = self.vae_assoc_model.generate(z_mu=z_mu)
             img_recover = img_incomplete.reshape((28, 28))
             img_recover[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)] = \
                     x_reconstr_means[0][0].reshape((28, 28))[14*fraction_idx[0]:14*(fraction_idx[0]+1), 14*fraction_idx[1]:14*(fraction_idx[1]+1)]
-            return img_recover
+
+            return img_recover.flatten(), x_reconstr_means[0][0], curr_mean
 
         return None
 
-    def derive_robot_motion_from_incomplete_img(self, img, img_incomplete, fraction_idx):
+    def derive_robot_motion_from_incomplete_img(self, img, img_incomplete, fraction_idx, rec_saver=None):
+        self.process_hist['img'].append(img)
+        self.process_hist['img_incomplete'].append(img_incomplete)
+        self.process_hist['img_fraction_idx'].append(fraction_idx)
 
-        img_est = self.derive_img_from_incomplete_img(img_incomplete, fraction_idx)
+        img_est, img_from_latent_rep, img_latent_rep = self.derive_img_from_incomplete_img(img_incomplete, fraction_idx)
 
-        if img_est is not None:
+        if img_est is not None and img_from_latent_rep is not None:
+            #do the write thing
             pass
+            #set the render to check the recovered image
+            fa_motion, jnt_motion, cart_motion = self.derive_robot_motion_from_img(img=img_est, latent_rep=img_latent_rep, posterior_rl=False, rec_saver=rec_saver)
+            return fa_motion, jnt_motion, cart_motion
 
+        if rec_saver is not None:
+            rec_saver(self.process_hist)
         return None, None, None
 
 import os
@@ -564,7 +612,7 @@ def main(use_gui=False):
 
         test_sample = bvaw.data_sets.test.next_batch(bvaw.batch_size)[0] #the first is feature, the second is the label
         test_img_sample = test_sample[:, :784]
-        fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(test_img_sample)
+        fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(img=test_img_sample)
 
         raw_input('ENTER to start the test...')
 
@@ -603,8 +651,8 @@ def main(use_gui=False):
         bvaw.image_render_func = dpad.on_update_explore_canvas
 
         #threading function
-        def threading_func(img_data, writer, rate, clean_pub, write_pub):
-            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(img_data)
+        def threading_func(img_data, writer, rate, clean_pub, write_pub, rec_saver):
+            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(img=img_data, latent_rep=None, posterior_rl=True, rec_saver=rec_saver)
             print 'Sending joint command to a viewer...'
             cln_pub.publish(Empty())
             for k in range(10):
@@ -618,15 +666,17 @@ def main(use_gui=False):
 
         #prepare a user callback to send the message
         def send_msg(gui):
-            t = threading.Thread(target=threading_func, args = (gui.img_data, bvaw, r, cln_pub, jnt_pub))
+            #refresh the history record
+            bvaw.process_hist = defaultdict(list)
+            t = threading.Thread(target=threading_func, args = (gui.img_data, bvaw, r, cln_pub, jnt_pub, gui.set_record))
             t.daemon = True
             t.start()
             return
 
         dpad.on_send_usr_callback = send_msg
 
-        def threading_func_incomplete(img_data, img_incomplete_data, fraction_idx, writer, rate, clean_pub, write_pub):
-            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_incomplete_img(img_data, img_incomplete_data, fraction_idx)
+        def threading_func_incomplete(img_data, img_incomplete_data, fraction_idx, writer, rate, clean_pub, write_pub, rec_saver):
+            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_incomplete_img(img_data, img_incomplete_data, fraction_idx, rec_saver)
             print 'Sending joint command to a viewer...'
             if jnt_motion is None:
                 print 'Invalid joint command, skip the publish...'
@@ -642,7 +692,9 @@ def main(use_gui=False):
             return
 
         def send_msg_incomplete(gui):
-            t = threading.Thread(target=threading_func_incomplete, args = (gui.img_data, gui.img_incomplete_data, gui.fraction_idx, bvaw, r, cln_pub, jnt_pub))
+            #refresh the history record
+            bvaw.process_hist = defaultdict(list)
+            t = threading.Thread(target=threading_func_incomplete, args = (gui.img_data, gui.img_incomplete_data, gui.fraction_idx, bvaw, r, cln_pub, jnt_pub, gui.set_record))
             t.daemon = True
             t.start()
             return
