@@ -206,10 +206,14 @@ def threshold_char_image(img):
 utility to segment character contour and get the rectangular bounding box
 '''
 def segment_char_contour_bounding_box(img):
-    # for opencv below 3.0.0
-    # ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # for opencv from 3.0.0
-    _, ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2_version = cv2.__version__.split('.')
+    print cv2_version
+    if int(cv2_version[0]) < 3:
+        # for opencv below 3.0.0
+        ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    else:
+        # for opencv from 3.0.0
+        _, ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     rects = [cv2.boundingRect(ctr) for ctr in ctrs]
     #for blank image
     if len(rects) == 0:
