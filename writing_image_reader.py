@@ -68,6 +68,7 @@ class ImageLetterProcessor:
             ret,thres = cv2.threshold(self.img_processed,96,255,cv2.THRESH_BINARY)
             # thres = cv2.adaptiveThreshold(self.img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,11,2)
             self.img_processed = 255-thres
+            # self.img_processed = thres
 
         return self.img_processed
 
@@ -79,7 +80,6 @@ class ImageLetterProcessor:
             center = [bound_rect[0] + bound_rect[2]/2., bound_rect[1] + bound_rect[3]/2.]
             #crop the interested part
             leng = max([int(bound_rect[2]), int(bound_rect[3])])
-            print(leng)
             border = int(0.6*leng)
             pt1 = int(center[1] -bound_rect[3] // 2)
             pt2 = int(center[0] -bound_rect[2] // 2)
@@ -124,7 +124,9 @@ def main(record=True):
         img_processor = ImageLetterProcessor(img=img)
         img_processed = img_processor.binarize_img()
         img_processed = img_processor.localize_img()
-        cv2.imshow("processed", img_processed)
+        img_processed = np.array(img_processed, dtype=np.uint8)
+        img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_processed))
+        cv2.imshow("processed", img_gs_inv_thumbnail)
         cv2.waitKey()
 
     return

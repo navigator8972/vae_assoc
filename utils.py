@@ -207,7 +207,7 @@ utility to segment character contour and get the rectangular bounding box
 '''
 def segment_char_contour_bounding_box(img):
     cv2_version = cv2.__version__.split('.')
-    print cv2_version
+    # print cv2_version
     if int(cv2_version[0]) < 3:
         # for opencv below 3.0.0
         ctrs, hier = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -241,7 +241,8 @@ def get_char_img_thumbnail_helper(img_data):
     border = int(0.6*leng)
     pt1 = int(center[1] -bound_rect[3] // 2)
     pt2 = int(center[0] -bound_rect[2] // 2)
-    cv_img_bckgrnd = np.ones((border+leng, border+leng))
+    # <hyin/Aug-15th-2016> change this from one to zero. Note this is different from the current generated data whose background color is not "fully dark"...
+    cv_img_bckgrnd = np.zeros((border+leng, border+leng))
     # print cv_img_bckgrnd.shape
     # print bound_rect
     # print center

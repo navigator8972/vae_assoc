@@ -271,7 +271,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
         gcem = pygcem.GaussianCEM(x0=init_latent_rep, eliteness=10, covar_full=False, covar_learning_rate=1, covar_scale=None, covar_bounds=[0.1])
         gcem.covar *= 0.01
         curr_mean = gcem.mean
-        print curr_mean
+        # print curr_mean
         # n_jobs = 4
 
         for itr in range(n_itrs):
@@ -514,7 +514,7 @@ class BaxterVAEAssocWriter(bw.BaxterWriter):
             gcem = pygcem.GaussianCEM(x0=init_latent_rep, eliteness=10, covar_full=False, covar_learning_rate=1, covar_scale=None, covar_bounds=[0.1])
             gcem.covar *= 0.05
             curr_mean = gcem.mean
-            print curr_mean
+            # print curr_mean
             # n_jobs = 4
 
             for itr in range(n_itrs):
@@ -587,7 +587,7 @@ from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 
 
-def main(use_gui=False):
+def main(use_gui=0):
     #prepare a writer and load a trained model
     tf.reset_default_graph()
     bvaw = BaxterVAEAssocWriter()
@@ -646,13 +646,13 @@ def main(use_gui=False):
             raw_input()
     else:
         app = QApplication(sys.argv)
-        dpad = dp.DrawingPad()
+        dpad = dp.DrawingPad(monitor=use_gui-2)
 
         bvaw.image_render_func = dpad.on_update_explore_canvas
 
         #threading function
         def threading_func(img_data, writer, rate, clean_pub, write_pub, rec_saver):
-            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(img=img_data, latent_rep=None, posterior_rl=True, rec_saver=rec_saver)
+            fa_motion, jnt_motion, cart_motion = bvaw.derive_robot_motion_from_img(img=img_data, latent_rep=None, posterior_rl=None, rec_saver=rec_saver)
             print 'Sending joint command to a viewer...'
             cln_pub.publish(Empty())
             for k in range(10):
@@ -710,4 +710,7 @@ def main(use_gui=False):
 if __name__ == '__main__':
     np.random.seed(0)
     tf.set_random_seed(0)
-    main(use_gui=True)
+    #0  - no gui
+    #1  - drawing pad
+    #2+ - camera 0+
+    main(use_gui=1)

@@ -43,7 +43,8 @@ n_z_array = [4]
 #assoc_lambda_array = [15, 40]
 assoc_lambda_array = [8]
 #weights_array = [[2, 1], [5, 1], [10, 1]]
-weights_array=[[30, 1], [50, 1]] #work: 30
+# weights_array=[[30, 1], [50, 1]]
+weights_array = [[50, 1]]
 
 plt.style.use('ggplot')
 

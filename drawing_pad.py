@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QTAgg as NavigationToolbar
+from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 matplotlib.rc('xtick', labelsize=8)
 matplotlib.rc('ytick', labelsize=8)
@@ -144,8 +144,56 @@ class DrawingPad_Painter(QWidget):
         buf = np.roll ( buf, 3, axis = 2 )
         return buf
 
+import cv2
+import writing_image_reader as wir
+
+class MonitorVideoThread(QThread):
+    def __init__(self,reader):
+        super(MonitorVideoThread, self).__init__()
+        self.reader = reader
+
+    def run(self):
+        while self.reader.cap.isOpened():
+            frame = self.reader.capture_image()
+            # adjust width en height to the preferred values
+            image = QImage(frame.tostring(),640,480,QImage.Format_RGB888).rgbSwapped()
+            self.emit(SIGNAL('newImage(QImage)'), image)
+
+class DrawingPad_Monitor(QWidget):
+    def __init__(self, camera_idx=1, parent=None):
+        QWidget.__init__(self, parent=parent)
+        self.video_label = QLabel()
+        self.hbox_layout = QHBoxLayout()
+        self.hbox_layout.addWidget(self.video_label, 5)
+
+        self.setLayout(self.hbox_layout)
+
+        self.reader = wir.CameraImageReader(camera_idx=camera_idx)
+        self.video = MonitorVideoThread(self.reader)
+        self.video.start()
+
+        #connect signal
+        self.video_label.connect(self.video,SIGNAL('newImage(QImage)'),self.set_frame)
+        return
+
+    def set_frame(self, frame):
+        if frame is not None:
+            pixmap = QPixmap.fromImage(frame)
+            self.video_label.setPixmap(pixmap)
+        return
+
+    def get_image_data(self):
+        img = self.reader.capture_image()
+        gray_image = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        print gray_image.shape
+        img_processor = wir.ImageLetterProcessor(img=gray_image)
+        img_processed = img_processor.binarize_img()
+        img_processed = img_processor.localize_img()
+        # print img_processed.shape
+        return np.array(img_processed, dtype=np.uint8)
+
 class DrawingPad(QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, monitor=-1, parent=None):
         QMainWindow.__init__(self, parent)
         self.resize(540, 360)
         self.move(400, 200)
@@ -154,7 +202,17 @@ class DrawingPad(QMainWindow):
         self.main_frame = QWidget()
         self.main_hbox = QHBoxLayout()
         self.painter = DrawingPad_Painter()
-        self.main_hbox.addWidget(self.painter)
+
+        if monitor > -1:
+            self.monitor = DrawingPad_Monitor(camera_idx=monitor)
+        else:
+            self.monitor = None
+
+        if self.monitor is not None:
+            self.main_hbox.addWidget(self.monitor, 0.5)
+        else:
+            self.main_hbox.addWidget(self.painter)
+
         self.main_frame.setLayout(self.main_hbox)
         self.setCentralWidget(self.main_frame)
         self.setWindowTitle('DrawingPad')
@@ -221,14 +279,21 @@ class DrawingPad(QMainWindow):
         return
 
     def on_send_button_clicked(self, event):
-        img_data = self.painter.get_image_data()
-        #prepare an image
-        w, h, d = img_data.shape
-        img = Image.fromstring( "RGBA", ( w ,h ), img_data.tostring() )
-        img_gs = img.convert('L')
-        # thumbnail_size = (28, 28)
-        # img_gs.thumbnail(thumbnail_size)
-        img_gs_inv = ImageOps.invert(img_gs)
+        if self.monitor is None:
+            img_data = self.painter.get_image_data()
+            #prepare an image
+            w, h, d = img_data.shape
+            img = Image.fromstring( "RGBA", ( w ,h ), img_data.tostring() )
+            img_gs = img.convert('L')
+            # thumbnail_size = (28, 28)
+            # img_gs.thumbnail(thumbnail_size)
+            img_gs_inv = ImageOps.invert(img_gs)
+        else:
+            img_data = self.monitor.get_image_data()
+            # img_gs_inv = 255 - img_data
+            img_gs_inv = img_data
+
+
         img_gs_inv_thumbnail, bound_rect = utils.get_char_img_thumbnail_helper(np.asarray(img_gs_inv))
         # img.show()
         self.img_data = np.asarray(img_gs_inv_thumbnail).flatten().astype(np.float32) * 1./255.
@@ -240,7 +305,11 @@ class DrawingPad(QMainWindow):
         return
 
     def on_send_incomplete_button_clicked(self, event):
-        img_data = self.painter.get_image_data()
+        if self.monitor is None:
+            img_data = self.painter.get_image_data()
+        else:
+            img_data = self.monitor.get_image_data()
+
         #prepare an image
         w, h, d = img_data.shape
         img = Image.fromstring( "RGBA", ( w ,h ), img_data.tostring() )
@@ -288,11 +357,18 @@ class DrawingPad(QMainWindow):
         self.record = rec
         return
 
+    def closeEvent(self, event):
+        if self.monitor is not None:
+            #stop the video stream
+            pass
+            # self.monitor.video.terminate()
+        return
+
 import sys
 
 def main():
     app = QApplication(sys.argv)
-    gui = DrawingPad()
+    gui = DrawingPad(monitor=1)
     gui.show()
     app.exec_()
     return
