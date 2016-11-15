@@ -65,7 +65,7 @@ class ImageLetterProcessor:
         if self.img_processed is None:
             print('No available image for processing.')
         else:
-            ret,thres = cv2.threshold(self.img_processed,96,255,cv2.THRESH_BINARY)
+            ret,thres = cv2.threshold(self.img_processed,108,255,cv2.THRESH_BINARY)
             # thres = cv2.adaptiveThreshold(self.img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,11,2)
             self.img_processed = 255-thres
             # self.img_processed = thres
