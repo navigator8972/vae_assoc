@@ -4,6 +4,7 @@ Variational Auto-encoders factored with enforced identity of the latent variable
 
 Yin, H., Melo, F. S., Billard, A. and Paiva, A. **Associate Latent Encodings in Learning from Demonstrations**. In Proceedings of the Thirty-First AAAI Conference on Artificial Intelligence (AAAI-17). San Francisco, California, USA.
 
+
 ## Downloading data and a model example
 ```
 $ cd bin
@@ -11,6 +12,7 @@ $ ./download_data.sh
 $ cd ../output
 $ ./download_model.sh
 ```
+[Video demo](https://www.dropbox.com/s/oexu3rduqdnqkb7/aaai17_video.wmv?dl=0)
 
 ## Observe associated encodings of letter images and dynamical writing motion
 ```
