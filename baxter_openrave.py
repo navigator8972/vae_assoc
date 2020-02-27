@@ -14,7 +14,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Empty
 import openravepy as orpy
 
-import baxter_pykdl
+from baxter_pykdl_revised import baxter_dynamics
 
 import utils
 
@@ -107,7 +107,7 @@ class BaxterWritingOpenRave():
         self.manip_pose = self.manip.GetBase().GetTransform()
 
         #prepare inverse kinematics model
-        self.robot_dynamics = baxter_pykdl.baxter_pykdl.baxter_dynamics(kin_name, self.baxter_urdf_path)
+        self.robot_dynamics = baxter_dynamics(kin_name, self.baxter_urdf_path)
         #print structure
         self.robot_dynamics.print_robot_description()
 

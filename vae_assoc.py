@@ -100,7 +100,7 @@ class AssocVariationalAutoEncoder(object):
                                           na)
             # z = mu + sigma*epsilon
             tmp_z = tf.add(tmp_z_mean,
-                            tf.mul(tf.sqrt(tf.exp(tmp_z_log_sigma_sq)), tmp_eps))
+                            tf.multiply(tf.sqrt(tf.exp(tmp_z_log_sigma_sq)), tmp_eps))
 
             # Use generator to determine mean of
             # Bernoulli distribution of reconstructed input
@@ -355,13 +355,13 @@ class AssocVariationalAutoEncoder(object):
                 tf.reduce_sum(
                 0.5 * (tf.reduce_sum(self.z_log_sigma_sqs[j], 1) - tf.reduce_sum(self.z_log_sigma_sqs[i], 1) - self.n_z
                 + tf.reduce_sum(tf.exp(self.z_log_sigma_sqs[i] - self.z_log_sigma_sqs[j]), 1)
-                + tf.reduce_sum(tf.mul(tf.square(self.z_means[j] - self.z_means[i]), tf.exp(-self.z_log_sigma_sqs[j])), 1))
+                + tf.reduce_sum(tf.multiply(tf.square(self.z_means[j] - self.z_means[i]), tf.exp(-self.z_log_sigma_sqs[j])), 1))
                 )
                 #<hyin/May-19th-2016> try a symmetry distance
                 + tf.reduce_sum(
                 0.5 * (tf.reduce_sum(self.z_log_sigma_sqs[i], 1) - tf.reduce_sum(self.z_log_sigma_sqs[j], 1) - self.n_z
                 + tf.reduce_sum(tf.exp(self.z_log_sigma_sqs[j] - self.z_log_sigma_sqs[i]), 1)
-                + tf.reduce_sum(tf.mul(tf.square(self.z_means[i] - self.z_means[j]), tf.exp(-self.z_log_sigma_sqs[i])), 1))
+                + tf.reduce_sum(tf.multiply(tf.square(self.z_means[i] - self.z_means[j]), tf.exp(-self.z_log_sigma_sqs[i])), 1))
                 )
                 )
 

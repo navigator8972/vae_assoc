@@ -13,7 +13,7 @@ from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
 
-import baxter_pykdl
+from baxter_pykdl_revised import baxter_dynamics
 
 import pylqr.pylqr_trajctrl as plqrtc
 import pyrbf_funcapprox as fa
@@ -44,7 +44,7 @@ class BaxterWriter():
         else:
             kin_name = 'right'
         # use revised baxter_pykdl to create inverse kinemtics model
-        self.robot_dynamics = baxter_pykdl.baxter_pykdl.baxter_dynamics(kin_name, self.baxter_urdf_path)
+        self.robot_dynamics = baxter_dynamics(kin_name, self.baxter_urdf_path)
         #print structure
         self.robot_dynamics.print_robot_description()
 
